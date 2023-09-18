@@ -16,7 +16,7 @@
     You should have received a copy of the GNU Affero General Public License
     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
-
+import os
 import numpy as np
 import struct
 import socket
@@ -91,7 +91,7 @@ class phy80211():
                 self.__genInterleaveDataBits()
                 self.__genConstellation()
                 self.__genOfdmSignal()
-            elif(mod.phyFormat == p8h.F.HT):
+            elif(mod.phyFormat == p8h.F.HT):#hereHT 
                 self.mpdu = mpdu
                 self.m = mod
                 self.m.ampdu = False
@@ -233,7 +233,7 @@ class phy80211():
             tmpLtf = tmpLtf[int(len(tmpLtf)/2):] + tmpLtf + tmpLtf
             self.ssLegacyTraining.append(p8h.procConcat2Symbol(tmpStf, tmpLtf))
         if self.ifdb: print("cloud phy80211, legacy training sample len %d" % (len(self.ssLegacyTraining[0])))
-
+        print("__genLegacyTraining", len(self.ssLegacyTraining),len(self.ssLegacyTraining[0]))
     def __genLegacySignal(self):
         # ieee 80211 2016 ofdm phy, sec 17.3.4
         self.ssLegacySig = []
@@ -253,6 +253,7 @@ class phy80211():
         # add 6 tail bits
         tmpHeaderBits += [0] * 6
         if self.ifdb: print("legacy len:", self.m.legacyLen)
+        print("legacy sig length",self.m.legacyLen)
         if self.ifdb: print("legacy sig bit length:", len(tmpHeaderBits))
         if self.ifdb: print(tmpHeaderBits)
         # convolution of sig bits, no scrambling for header
@@ -280,6 +281,8 @@ class phy80211():
         for ssItr in range(0, self.m.nSS):
             self.ssLegacySig.append(p8h.procGi(p8h.procToneScaling(p8h.procFftMod(p8h.procLegacyCSD(tmpHeaderQam, self.m.nSS, ssItr, self.m.spr)), p8h.C_SCALENTF_SIG_L[self.m.bw.value], self.m.nSS)))
         if self.ifdb: print("legacy sig sample len %d" % (len(self.ssLegacySig[0])))
+
+
 
     def __genHtSignal(self):
         self.ssHtSig = []
@@ -339,7 +342,7 @@ class phy80211():
         # insert pilot and non data sc
         tmpSig1Qam = p8h.procNonDataSC(p8h.procDcInsert(p8h.procPilotInsert(tmpSig1Qam, [1,1,1,-1])))
         tmpSig2Qam = p8h.procNonDataSC(p8h.procDcInsert(p8h.procPilotInsert(tmpSig2Qam, [1,1,1,-1])))
-        # higher bw
+        # higher bw 
         if (self.m.bw == p8h.BW.BW40):
             tmpSig1Qam = tmpSig1Qam * 2
             tmpSig2Qam = tmpSig2Qam * 2
@@ -460,17 +463,24 @@ class phy80211():
         tmpSsNonLegacyTraining = []
         for i in range(0, self.m.nSS):
             tmpSsNonLegacyTraining.append([])
-        # short training field, consider the beamforming spatial mapping
+        # short training field, consi
+        # der the beamforming spatial mapping
         tmpStf = []
         for ssItr in range(0, self.m.nSS):
             tmpStf.append(p8h.procCSD(p8h.procNonDataSC(p8h.C_STF_VHT[self.m.bw.value]), self.m.nSS, ssItr, self.m.spr))
+
+
+
         if(self.m.phyFormat == p8h.F.VHT and self.m.mu):
             tmpStf = p8h.procSpatialMapping(tmpStf, self.bfQ)
+
+
         for ssItr in range(0, self.m.nSS):
             tmpSsNonLegacyTraining[ssItr] = p8h.procGi(p8h.procToneScaling(p8h.procFftMod(tmpStf[ssItr]), p8h.C_SCALENTF_STF_VHT[self.m.bw.value], self.m.nSS))
+
         # long training field, consider the vht different polarity setting and beamforming spatial mapping
         for ltfIter in range(0, self.m.nLtf):
-            # LTF is processed symbol by symbol
+            # LTF is processed symbol by symbol  -  HT-LTF mappting matrix
             tmpLtfSs = []
             for ssItr in range(0, self.m.nSS):
                 if(self.m.phyFormat == p8h.F.VHT):
@@ -490,17 +500,18 @@ class phy80211():
                     if self.ifdb: print("ltf n ", ltfIter, ", ss ", ssItr, p8h.procNonDataSC(tmpVhtLtf))
                     tmpLtfSs.append(p8h.procCSD(p8h.procNonDataSC(tmpVhtLtf), self.m.nSS, ssItr, self.m.spr))
                 else:
-                    tmpVhtLtf = []
+                    tmpVhtLtf = [] #result of multiplt P_HT-LTF
                     for eachSc in p8h.C_LTF_HT[self.m.bw.value]:
                         tmpVhtLtf.append(eachSc * p8h.C_P_LTF_VHT_4[ssItr][ltfIter])
                     tmpLtfSs.append(p8h.procCSD(p8h.procNonDataSC(tmpVhtLtf), self.m.nSS, ssItr, self.m.spr))
-            # spatial mapping for beamforming
+            # spatial spatial mapping for beamforming
             if(self.m.phyFormat == p8h.F.VHT and self.m.mu):
                 tmpLtfSs = p8h.procSpatialMapping(tmpLtfSs, self.bfQ)
             for ssItr in range(0, self.m.nSS):
                 tmpSsNonLegacyTraining[ssItr] = p8h.procConcat2Symbol(
                     tmpSsNonLegacyTraining[ssItr],
                     p8h.procGi(p8h.procToneScaling(p8h.procFftMod(tmpLtfSs[ssItr]), p8h.C_SCALENTF_LTF_VHT[self.m.bw.value], self.m.nSS)))
+               
         if(self.m.phyFormat == p8h.F.VHT):
             self.ssVhtTraining = tmpSsNonLegacyTraining
         else:
@@ -508,7 +519,7 @@ class phy80211():
         for ssIter in range(0, self.m.nSS):
             if self.ifdb: print("non legacy training ss %d, sample len %d" % (ssIter, len(tmpSsNonLegacyTraining[ssIter])))
             if self.ifdb: print(tmpSsNonLegacyTraining[ssIter])
-
+        print("__genNonLegacyTraining",len(tmpSsNonLegacyTraining),len(tmpSsNonLegacyTraining[0]))
     def __genVhtSignalB(self):
         self.ssVhtSigB = []
         tmpVhtSigBBits = []
@@ -674,6 +685,7 @@ class phy80211():
                 for each in self.mpdu:
                     for i in range(0,8):
                         tmpMpduBits.append((each>>i) & (1))
+
                 tmpPsduBits = tmpMpduBits
             # service bits
             tmpServiceBits = [0] * 16
@@ -687,7 +699,7 @@ class phy80211():
         if self.ifdb: print("scrambled bits: %d" % len(tmpScrambledBits))
         if self.ifdb: print(tmpScrambledBits)
         if(self.m.phyFormat == p8h.F.VHT):
-            for i in range(0, self.m.nES):
+            for i in range(0, self.m.nES): #nES
                 # divide scrambled bits for bcc coders, since tail is not added yet, minus 6
                 tmpDividedBits = [tmpScrambledBits[each] for each in range((0+i), int(self.m.nDBPS * self.m.nSym / self.m.nES - 6), self.m.nES)]
                 # add tail bits to it
@@ -700,17 +712,20 @@ class phy80211():
                 tmpScrambledBits[16 + self.m.psduLen*8 + i] = 0
             if self.ifdb: print("scrambled bits after reset tail: %d" % len(tmpScrambledBits))
             if self.ifdb: print(tmpScrambledBits)
-            for i in range(0, self.m.nES):
+            for i in range(0, self.m.nES): ## implemetation of BCC encoder ?
+                                            ## if Nes = 2: two coded stream out  
                 # divide scrambled bits for bcc coders, for HT bits are divided alternatively
                 tmpDividedBits = [tmpScrambledBits[each] for each in range((0+i), int(self.m.nDBPS * self.m.nSym / self.m.nES), self.m.nES)]
+                
                 # coding and puncturing
                 self.esCodedBits.append(p8h.procBcc(tmpDividedBits, self.m.cr))
         for each in self.esCodedBits:
             if self.ifdb: print("coded bits: %d" % len(each))
             if self.ifdb: print(each)
-
+        print("coded bits: %d" % len(each),self.m.nES)
     def __genStreamParserDataBits(self):
         """
+
             each round get S bits from one encoder, then assign the S bits to the streams
             this works for HT and VHT usual conditions
             for vht 20/40/80 4x4, nBlock * nES * S is smaller than nCBPSS
@@ -723,16 +738,17 @@ class phy80211():
                 self.ssStreamBits.append([0] * self.m.nSym * self.m.nCBPSS)
             s = int(max(1, self.m.nBPSCS/2))
             cs = self.m.nSS * s     # cs is the capital S used in standard
-            for isym in range(0, self.m.nSym):
-                for iss in range(0, self.m.nSS):
-                    for k in range(0, int(self.m.nCBPSS)):
+            for isym in range(0, self.m.nSym): #select one symbol  ->  #each symbol distribute into 
+                for iss in range(0, self.m.nSS): # two ss take turn; SS[0] first; SS[1] next 
+                    for k in range(0, int(self.m.nCBPSS)): #each SS has nCBPSS btis !!nCBPSS =nCBPS/2
                         j = int(np.floor(k/s)) % self.m.nES
                         i = (iss) * s + cs * int(np.floor(k/(self.m.nES * s))) + int(k % s)
                         self.ssStreamBits[iss][k + int(isym * self.m.nCBPSS)] = self.esCodedBits[j][i + int(isym * self.m.nCBPS)]
         for each in self.ssStreamBits:
             if self.ifdb: print("stream parser bits:", len(each))
             if self.ifdb: print(each)
-
+        print("stream parser bits:", len(self.ssStreamBits),len(self.ssStreamBits[0]))
+        
     def __genInterleaveDataBits(self):
         self.ssIntedBits = []
         for i in range(0, self.m.nSS):
@@ -741,10 +757,11 @@ class phy80211():
             self.ssIntedBits = p8h.procInterleaveLegacy(self.ssStreamBits, self.m)
         else:
             self.ssIntedBits = p8h.procInterleaveNonLegacy(self.ssStreamBits, self.m)
+
         for each in self.ssIntedBits:
             if self.ifdb: print("interleaved stream bits:", len(each))
             if self.ifdb: print(each)
-
+        print("__genInterleaveDataBits ", len(self.ssIntedBits))
     def __genConstellation(self):
         self.ssSymbols = []
         for i in range(0, self.m.nSS):
@@ -815,8 +832,9 @@ class phy80211():
                 p8h.procFftMod(p8h.procCSD(p8h.procNonDataSC(p8h.procDcInsert(tmpPilotAdded)), self.m.nSS, ssItr, self.m.spr)),
                 tmpDataScaleFactor, self.m.nSS)))
                 tmpPilotPIdx = (tmpPilotPIdx + 1) % 127
+                
                 if(not(self.m.phyFormat == p8h.F.L)):
-                    tmpPilot = tmpPilot[1:] + [tmpPilot[0]]
+                    tmpPilot = tmpPilot[1:] + [tmpPilot[0]] #?
 
     def __genOfdmSignalNdp(self):
         self.ssPhySig = []
@@ -1061,6 +1079,7 @@ class phy80211():
             plt.show()
     
     def genMultiSigBinFile(self, ssSigList, fileAddr="", draw = False):
+        print("in genMultiSigBinFile", fileAddr)
         if(len(fileAddr)<1):
             print("cloud phy80211, genSigBinFile file address not given")
             return
@@ -1325,5 +1344,11 @@ def procVhtVCompress(v, codeBookInfo = 0, ifDebug = False):
                 print(resType)
     return resValue, resType
 
+
 if __name__ == "__main__":
-    pass
+    phy = phy80211()
+    pyToolPath = os.path.dirname(__file__)
+    print(pyToolPath)
+    addr = os.path.join(pyToolPath, "../tmp/sig80211GenMultipleSiso_1x1_0.bin")
+    sig = p8h.procLoadComplexBin(addr)
+    print("-----")

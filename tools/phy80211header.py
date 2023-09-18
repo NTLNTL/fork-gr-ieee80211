@@ -313,10 +313,11 @@ class modulation:
                 self.nDBPS = int(self.nCBPS / 4 * 3)
             else:  # 56
                 self.nDBPS = int(self.nCBPS / 6 * 5)
+            # print("check modulation", self.nBPSCS, self.nCBPS,self.nDBPS,self.nCBPSS) 
 
             self.dr = self.nDBPS / 4.0
             self.drs = self.nDBPS / 3.6
-            if (self.drs < 300.1):
+            if (self.drs < 300.1):#? 
                 self.nES = 1
             else:
                 self.nES = 2
@@ -441,19 +442,21 @@ class modulation:
             self.legacyLen = mpduLen
         elif (self.phyFormat == F.HT):
             self.mpduLen = mpduLen  # mpdu len
+            print("self.mpduLen = ",self.mpduLen)
             self.ampduLen = 0  # ampdu len
             self.psduLen = mpduLen  # psdu len
             self.nSym = mSTBC * int(np.ceil((self.psduLen * 8 + nService + nTail * self.nES) / (self.nDBPS * mSTBC)))
             self.nPadEof = 0
             self.nPadOctet = 0
             self.nPadBits = int(self.nSym * self.nDBPS - 8 * self.psduLen - nService - nTail * self.nES)
+
             # tx time in us, sum of 
             # legacy preamble + legacy sig = 20, ht sig = 8, ht preamble = 4 + 4n, symbol
             if(self.sgi):
-                self.txTime = int( 20 + 8 + 4 + self.nLtf * 4 + int(np.ceil((self.nSym * 3.6)/4)) * 4 )
+                self.txTime = int( 20 + 8 + 4 + self.nLtf * 4 + int(np.ceil((self.nSym * 3.6)/4)) * 4 )#us
             else:
                 self.txTime = int( 20 + 8 + 4 + self.nLtf * 4 + self.nSym * 4 )
-            self.legacyLen = int((self.txTime - 20)/4) * 3 - 3
+            self.legacyLen = int((self.txTime - 20)/4) * 3 - 3 #? 
         else:  # VHT
             print("cloud phy80211 header, mod gen pkt len non aggre only l and ht")
         # print("mpdu len: %d, psdu len: %d, nSym: %d, txTime: %d" % (self.mpduLen, self.psduLen, self.nSym, self.txTime))
@@ -875,7 +878,8 @@ def procInterleaveNonLegacy(inSsBits, mod):
         tmpSsIntedBits = []
         for i in range(0, mod.nSS):
             tmpSsIntedBits.append([])
-        s = int(max(1, mod.nBPSCS/2))
+        s = int(max(1, mod.nBPSCS/2))    #self.nBPSCS, self.nCBPS,self.nDBPS,self.nCBPSS
+
         for ssItr in range(0, mod.nSS):
             tmpSsIntedBits[ssItr] = [0] * len(inSsBits[ssItr])
             for symPtr in range(0, mod.nSym):
@@ -1388,6 +1392,7 @@ def procLoadComplexBin(inAddr):
         for i in range(0, sigSampNum):
             sigComp.append(complex(struct.unpack('f', fileBytes[i*8:i*8+4])[0], struct.unpack('f', fileBytes[i*8+4:i*8+8])[0]))
         return sigComp
+    else: print("read error")
         
 
 def genNoiseAmpWithSnrDb(sigAmp, snrDbList):
@@ -1396,6 +1401,7 @@ def genNoiseAmpWithSnrDb(sigAmp, snrDbList):
 
 if __name__ == "__main__":
     print(genNoiseAmpWithSnrDb(0.26125001, [20, 22, 24, 26, 28, 30]))
+
     pass
 
 
