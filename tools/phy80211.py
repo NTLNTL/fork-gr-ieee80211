@@ -226,9 +226,15 @@ class phy80211():
             tmpStf = p8h.procToneScaling(p8h.procFftMod(
                 p8h.procLegacyCSD(p8h.procNonDataSC(p8h.C_STF_L[self.m.bw.value]), self.m.nSS, ssItr, self.m.spr)),
                                          p8h.C_SCALENTF_STF_L[self.m.bw.value], self.m.nSS)
+            
+
             tmpLtf = p8h.procToneScaling(p8h.procFftMod(
                 p8h.procLegacyCSD(p8h.procNonDataSC(p8h.C_LTF_L[self.m.bw.value]), self.m.nSS, ssItr, self.m.spr)),
                                          p8h.C_SCALENTF_LTF_L[self.m.bw.value], self.m.nSS)
+            
+
+            plt.plot(tmpStf)
+            plt.plot()
             tmpStf = tmpStf[int(len(tmpStf)/2):] + tmpStf + tmpStf
             tmpLtf = tmpLtf[int(len(tmpLtf)/2):] + tmpLtf + tmpLtf
             self.ssLegacyTraining.append(p8h.procConcat2Symbol(tmpStf, tmpLtf))
@@ -872,6 +878,7 @@ class phy80211():
     def __procRxLegacyStfCoarseCfoEst(self, inSig, nRad):
         if(len(inSig) >= (nRad + 16)):
             tmpMultiAvg = np.mean([inSig[i] * np.conj(inSig[i + 16]) for i in range(0, nRad)])
+            print("in __procRxLegacyStfCoarseCfoEst",tmpMultiAvg,np.arctan2(np.imag(tmpMultiAvg), np.real(tmpMultiAvg)) / 16 * 20000000 / 2 / np.pi)
             return np.arctan2(np.imag(tmpMultiAvg), np.real(tmpMultiAvg)) / 16 * 20000000 / 2 / np.pi
 
     def __procRxLegacyLtfSync(self, inSig, coarseCfo):
@@ -1349,6 +1356,13 @@ if __name__ == "__main__":
     phy = phy80211()
     pyToolPath = os.path.dirname(__file__)
     print(pyToolPath)
-    addr = os.path.join(pyToolPath, "../tmp/sig80211GenMultipleSiso_1x1_0.bin")
-    sig = p8h.procLoadComplexBin(addr)
-    print("-----")
+    # addr = os.path.join(pyToolPath, "../tmp/sig80211GenMultipleSiso_1x1_0.bin")
+    # print("start")
+    # addr = os.path.join(pyToolPath, "C:/Users/naton/Dropbox/sta0recording.bin")
+    # print(addr)
+
+    # sig = p8h.procLoadComplexBin(addr)
+    # print("-----")
+
+    # print("-----")
+    # phy.procSisoRx(sig)
