@@ -305,6 +305,10 @@ class modulation:
 
             self.nCBPSS = int(self.nSD * self.nBPSCS)
             self.nCBPS = int(self.nCBPSS * self.nSS)
+
+            print("here!!", self.nBPSCS, self.nCBPSS,self.nCBPS)
+            print("self.nSS",self.nSS)
+
             if (self.cr == CR.CR12):
                 self.nDBPS = int(self.nCBPS / 2)
             elif (self.cr == CR.CR23):
@@ -442,10 +446,10 @@ class modulation:
             self.legacyLen = mpduLen
         elif (self.phyFormat == F.HT):
             self.mpduLen = mpduLen  # mpdu len
-            print("self.mpduLen = ",self.mpduLen)
             self.ampduLen = 0  # ampdu len
             self.psduLen = mpduLen  # psdu len
             self.nSym = mSTBC * int(np.ceil((self.psduLen * 8 + nService + nTail * self.nES) / (self.nDBPS * mSTBC)))
+            print("in ht nSYm",self.nSym, self.psduLen, nService,nTail * self.nES,self.nDBPS * mSTBC)
             self.nPadEof = 0
             self.nPadOctet = 0
             self.nPadBits = int(self.nSym * self.nDBPS - 8 * self.psduLen - nService - nTail * self.nES)
@@ -457,6 +461,7 @@ class modulation:
             else:
                 self.txTime = int( 20 + 8 + 4 + self.nLtf * 4 + self.nSym * 4 )
             self.legacyLen = int((self.txTime - 20)/4) * 3 - 3 #? 
+            print("self.legacyLen in HT ",self.legacyLen) #
         else:  # VHT
             print("cloud phy80211 header, mod gen pkt len non aggre only l and ht")
         # print("mpdu len: %d, psdu len: %d, nSym: %d, txTime: %d" % (self.mpduLen, self.psduLen, self.nSym, self.txTime))
@@ -808,6 +813,7 @@ def procScramble(inBits, scrambler):
         scrambler = ((scrambler << 1) & 0x7e) | tmpFeedback
     return tmpScrambleBits
 
+
 def procInterleaveSigL(inBits):
     if(isinstance(inBits, list)):
         tmpIntedBits = [0] * len(inBits)
@@ -847,6 +853,7 @@ def procStreamParserNonLegacy(inEsBits, mod):
                     for k in range(0, int(mod.nCBPSS)):
                         j = int(np.floor(k/s)) % mod.nES
                         i = (iss) * s + cs * int(np.floor(k/(mod.nES * s))) + int(k % s)
+                        
                         tmpSsStreamBits[iss][k + int(isym * mod.nCBPSS)] = inEsBits[j][i + int(isym * mod.nCBPS)]
             return tmpSsStreamBits
     return []
@@ -864,6 +871,7 @@ def procInterleaveLegacy(inSsBits, mod):
                 i = int((mod.nCBPS/16) * (k % 16) + np.floor(k/16))
                 j = int(s * int(np.floor(i/s)) + (int(i + mod.nCBPS - np.floor(16 * i / mod.nCBPS)) % s))
                 tmpSsIntedBits[0][j + symPtr * mod.nCBPSS] = inSsBits[0][k + symPtr * mod.nCBPSS]
+               
         return tmpSsIntedBits
     print("cloud phy80211 header, interleave legacy input error")
     return []
@@ -878,11 +886,11 @@ def procInterleaveNonLegacy(inSsBits, mod):
         tmpSsIntedBits = []
         for i in range(0, mod.nSS):
             tmpSsIntedBits.append([])
-        s = int(max(1, mod.nBPSCS/2))    #self.nBPSCS, self.nCBPS,self.nDBPS,self.nCBPSS
+        s = int(max(1, mod.nBPSCS/2))    
 
         for ssItr in range(0, mod.nSS):
             tmpSsIntedBits[ssItr] = [0] * len(inSsBits[ssItr])
-            for symPtr in range(0, mod.nSym):
+            for symPtr in range(0, mod.nSym):#mod.nSym
                 for k in range(0, mod.nCBPSS):
                     i = mod.nIntlevRow * (k % mod.nIntlevCol) + int(np.floor(k/mod.nIntlevCol))
                     j = s * int(np.floor(i/s)) + (i + mod.nCBPSS - int(np.floor(mod.nIntlevCol * i / mod.nCBPSS))) % s
@@ -916,13 +924,15 @@ def procTonePhase(inQam):
         print("cloud phy80211 header, procTonePhase: input length error %d" % (len(inQam)))
 
 def procPilotInsert(inQam, p):
-    if(len(inQam) == 48 and len(p) == 4):   # 20
+    if(len(inQam) == 48 and len(p) == 4):   # 20 -->52 
+        out = inQam[0:5] + [p[0]] + inQam[5:18] + [p[1]] + inQam[18:30] + [p[2]] + inQam[30:43] + [p[3]] + inQam[43:48]
+        print(out[5],out[19],out[32],out[46])
         return (inQam[0:5] + [p[0]] + inQam[5:18] + [p[1]] + inQam[18:30] + [p[2]] + inQam[30:43] + [p[3]] + inQam[43:48])
-    elif(len(inQam) == 52 and len(p) == 4): # 20
+    elif(len(inQam) == 52 and len(p) == 4): # 20 -->56
         return (inQam[0:7] + [p[0]] + inQam[7:20] + [p[1]] + inQam[20:32] + [p[2]] + inQam[32:45] + [p[3]] + inQam[45:52])
-    elif(len(inQam) == 110 and len(p) == 6):    # 40
+    elif(len(inQam) == 110 and len(p) == 6):    # 40 --> 116 
         return (inQam[0:5] + [p[0]] + inQam[5:20] + [p[1]] + inQam[20:45] + [p[2]] + inQam[45:65] + [p[3]] + inQam[65:78] + [p[4]] + inQam[78:105] + [p[5]] + inQam[105:110])
-    elif(len(inQam) == 236 and len(p) == 8):    # 80
+    elif(len(inQam) == 236 and len(p) == 8):    # 80 -->244
         return (inQam[0:19] + [p[0]] + inQam[19:46] + [p[1]] + inQam[46:81] + [p[2]] + inQam[81:108] + [p[3]] + inQam[108:128] + [p[4]] + inQam[128:155] + [p[5]] + inQam[155:190] + [p[6]] + inQam[190:217] + [p[7]] + inQam[217:236])
     else:
         print("cloud phy80211 header, procPilotInsert: input length error qam %d pilots %d" % (len(inQam), len(p)))
@@ -1177,6 +1187,7 @@ def procFftDemod(inSig):
         return []
 
 def procRmDcNonDataSc(inSig, phyFormat):
+    print("procRmDcNonDataSc phyFormat",phyFormat)
     if(isinstance(inSig, list) and isinstance(phyFormat, F)):
         if(len(inSig) in [64, 128, 256]):
             # fft shift

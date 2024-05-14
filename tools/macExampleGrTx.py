@@ -164,33 +164,33 @@ if __name__ == "__main__":
     phyTxPort = 9528
     phyTxAddr = (phyTxIp, phyTxPort)
     grSocket = socket.socket(family = socket.AF_INET, type = socket.SOCK_DGRAM)
-    grSocket.bind(phyRxAddr)
+    # grSocket.bind(phyRxAddr)
 
     udpPayload  = "123456789012345678901234567890"
     pkt = genMac80211UdpMPDU(udpPayload)
     pkts = genMac80211UdpAmpduVht([udpPayload])
 
-    """packets of different formats or MCS SISO """
-    for mcsIter in range(0, 8):
-        grPkt = phy80211.genPktGrData(pkt, p8h.modulation(phyFormat=p8h.F.L, mcs = mcsIter, bw=p8h.BW.BW20, nSTS=1, shortGi=False))
-        grSocket.sendto(grPkt, phyTxAddr)
-    for mcsIter in range(0, 8):
-        grPkt = phy80211.genPktGrData(pkt, p8h.modulation(phyFormat=p8h.F.HT, mcs = mcsIter, bw=p8h.BW.BW20, nSTS=1, shortGi=False))
-        grSocket.sendto(grPkt, phyTxAddr)
-    for mcsIter in range(0, 9):
-        grPkt = phy80211.genPktGrData(pkts, p8h.modulation(phyFormat=p8h.F.VHT, mcs = mcsIter, bw=p8h.BW.BW20, nSTS=1, shortGi=False))
-        grSocket.sendto(grPkt, phyTxAddr)
+    # """packets of different formats or MCS SISO """
+    # for mcsIter in range(0, 8):
+    #     grPkt = phy80211.genPktGrData(pkt, p8h.modulation(phyFormat=p8h.F.L, mcs = mcsIter, bw=p8h.BW.BW20, nSTS=1, shortGi=False))
+    #     grSocket.sendto(grPkt, phyTxAddr)
+    # for mcsIter in range(0, 8):
+    #     grPkt = phy80211.genPktGrData(pkt, p8h.modulation(phyFormat=p8h.F.HT, mcs = mcsIter, bw=p8h.BW.BW20, nSTS=1, shortGi=False))
+    #     grSocket.sendto(grPkt, phyTxAddr)
+    # for mcsIter in range(0, 9):
+    #     grPkt = phy80211.genPktGrData(pkts, p8h.modulation(phyFormat=p8h.F.VHT, mcs = mcsIter, bw=p8h.BW.BW20, nSTS=1, shortGi=False))
+    #     grSocket.sendto(grPkt, phyTxAddr)
 
-    """packets of different formats or MCS MIMO """
-    for mcsIter in range(0, 8):
-        grPkt = phy80211.genPktGrData(pkt, p8h.modulation(phyFormat=p8h.F.HT, mcs = mcsIter+8, bw=p8h.BW.BW20, nSTS=2, shortGi=False))
-        grSocket.sendto(grPkt, phyTxAddr)
-    for mcsIter in range(0, 9):
-        grPkt = phy80211.genPktGrData(pkts, p8h.modulation(phyFormat=p8h.F.VHT, mcs = mcsIter, bw=p8h.BW.BW20, nSTS=2, shortGi=False))
-        grSocket.sendto(grPkt, phyTxAddr)
+    # """packets of different formats or MCS MIMO """
+    # for mcsIter in range(0, 8):
+    #     grPkt = phy80211.genPktGrData(pkt, p8h.modulation(phyFormat=p8h.F.HT, mcs = mcsIter+8, bw=p8h.BW.BW20, nSTS=2, shortGi=False))
+    #     grSocket.sendto(grPkt, phyTxAddr)
+    # for mcsIter in range(0, 9):
+    #     grPkt = phy80211.genPktGrData(pkts, p8h.modulation(phyFormat=p8h.F.VHT, mcs = mcsIter, bw=p8h.BW.BW20, nSTS=2, shortGi=False))
+    #     grSocket.sendto(grPkt, phyTxAddr)
 
     """packet of NDP 2x2 """
-    # grSocket.sendto(phy80211.genPktGrNdp(), phyTxAddr)
+    grSocket.sendto(phy80211.genPktGrNdp(), phyTxAddr)
 
     """packet of multi-user mimo """
     # # read channel bin file, they are the vht long training field received at each station

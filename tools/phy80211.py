@@ -27,6 +27,7 @@ import mac80211
 import phy80211header as p8h
 import random
 import time
+import pktRxExample as rxp8h
 
 class phy80211():
     def __init__(self, ifDebug = True):
@@ -91,7 +92,7 @@ class phy80211():
                 self.__genInterleaveDataBits()
                 self.__genConstellation()
                 self.__genOfdmSignal()
-            elif(mod.phyFormat == p8h.F.HT):#hereHT 
+            elif(mod.phyFormat == p8h.F.HT):
                 self.mpdu = mpdu
                 self.m = mod
                 self.m.ampdu = False
@@ -233,10 +234,16 @@ class phy80211():
                                          p8h.C_SCALENTF_LTF_L[self.m.bw.value], self.m.nSS)
             
 
-            plt.plot(tmpStf)
-            plt.plot()
+            
+            # myConstellationPlot(p8h.procFftDemod(p8h.procFftMod(
+            #     p8h.procLegacyCSD(p8h.procNonDataSC(p8h.C_LTF_L[self.m.bw.value]), self.m.nSS, ssItr, self.m.spr))))
+            
+            # plt.show()
             tmpStf = tmpStf[int(len(tmpStf)/2):] + tmpStf + tmpStf
             tmpLtf = tmpLtf[int(len(tmpLtf)/2):] + tmpLtf + tmpLtf
+
+  
+            
             self.ssLegacyTraining.append(p8h.procConcat2Symbol(tmpStf, tmpLtf))
         if self.ifdb: print("cloud phy80211, legacy training sample len %d" % (len(self.ssLegacyTraining[0])))
         print("__genLegacyTraining", len(self.ssLegacyTraining),len(self.ssLegacyTraining[0]))
@@ -524,7 +531,7 @@ class phy80211():
             self.ssHtTraining = tmpSsNonLegacyTraining
         for ssIter in range(0, self.m.nSS):
             if self.ifdb: print("non legacy training ss %d, sample len %d" % (ssIter, len(tmpSsNonLegacyTraining[ssIter])))
-            if self.ifdb: print(tmpSsNonLegacyTraining[ssIter])
+            # if self.ifdb: print(tmpSsNonLegacyTraining[ssIter])
         print("__genNonLegacyTraining",len(tmpSsNonLegacyTraining),len(tmpSsNonLegacyTraining[0]))
     def __genVhtSignalB(self):
         self.ssVhtSigB = []
@@ -691,8 +698,8 @@ class phy80211():
                 for each in self.mpdu:
                     for i in range(0,8):
                         tmpMpduBits.append((each>>i) & (1))
-
                 tmpPsduBits = tmpMpduBits
+                print("self.mpdu len",len(self.mpdu))
             # service bits
             tmpServiceBits = [0] * 16
             self.dataBits = tmpServiceBits + tmpPsduBits + [0] * 6 * self.m.nES + [0] * self.m.nPadBits
@@ -705,7 +712,7 @@ class phy80211():
         if self.ifdb: print("scrambled bits: %d" % len(tmpScrambledBits))
         if self.ifdb: print(tmpScrambledBits)
         if(self.m.phyFormat == p8h.F.VHT):
-            for i in range(0, self.m.nES): #nES
+            for i in range(0, self.m.nES):
                 # divide scrambled bits for bcc coders, since tail is not added yet, minus 6
                 tmpDividedBits = [tmpScrambledBits[each] for each in range((0+i), int(self.m.nDBPS * self.m.nSym / self.m.nES - 6), self.m.nES)]
                 # add tail bits to it
@@ -744,7 +751,7 @@ class phy80211():
                 self.ssStreamBits.append([0] * self.m.nSym * self.m.nCBPSS)
             s = int(max(1, self.m.nBPSCS/2))
             cs = self.m.nSS * s     # cs is the capital S used in standard
-            for isym in range(0, self.m.nSym): #select one symbol  ->  #each symbol distribute into 
+            for isym in range(0, self.m.nSym): # select one symbol  ->  #each symbol distribute into 
                 for iss in range(0, self.m.nSS): # two ss take turn; SS[0] first; SS[1] next 
                     for k in range(0, int(self.m.nCBPSS)): #each SS has nCBPSS btis !!nCBPSS =nCBPS/2
                         j = int(np.floor(k/s)) % self.m.nES
@@ -782,6 +789,11 @@ class phy80211():
             if self.ifdb: print(ssItr, ssItr, ssItr)
         for each in self.ssSymbols:
             if self.ifdb: print("constellation data", len(each))
+            if self.ifdb: print("constellation data first", each)
+            # if self.ifdb: print([np.sqrt(42) * item for item in each])
+            # if self.ifdb: print(each)
+            # myConstellationPlot(each)
+            
 
     def __genOfdmSignalMu(self):
         self.ssPhySig = []
@@ -826,7 +838,7 @@ class phy80211():
                 self.ssPhySig[ssItr] = p8h.procConcat2Symbol(self.ssPhySig[ssItr], self.ssHtTraining[ssItr])
                 tmpPilot = p8h.C_PILOT_HT[self.m.bw.value][self.m.nSS - 1][ssItr]
                 tmpPilotPIdx = 3
-                # print("cloud phy80211, gen ofdm get ht pilot: ", tmpPilot)
+                print("cloud phy80211, gen ofdm get ht pilot: ", tmpPilot,self.m.nSym)
                 tmpDataScaleFactor = p8h.C_SCALENTF_DATA_HT[self.m.bw.value]
             else:
                 tmpPilot = p8h.C_PILOT_L
@@ -834,6 +846,7 @@ class phy80211():
                 tmpDataScaleFactor = 52
             for symIter in range(0, self.m.nSym):
                 tmpPilotAdded = p8h.procPilotInsert(self.ssSymbols[ssItr][int(symIter*self.m.nSD): int((symIter+1)*self.m.nSD)], [each * p8h.C_PILOT_PS[tmpPilotPIdx] for each in tmpPilot])
+                print("pilot print",[each * p8h.C_PILOT_PS[tmpPilotPIdx] for each in tmpPilot])
                 self.ssPhySig[ssItr] = p8h.procConcat2Symbol(self.ssPhySig[ssItr], p8h.procGi(p8h.procToneScaling(
                 p8h.procFftMod(p8h.procCSD(p8h.procNonDataSC(p8h.procDcInsert(tmpPilotAdded)), self.m.nSS, ssItr, self.m.spr)),
                 tmpDataScaleFactor, self.m.nSS)))
@@ -855,6 +868,7 @@ class phy80211():
     def __genSignalWithCfo(self, inSig, cfoHz):
         self.cfohz = cfoHz
         tmpRadStep = cfoHz * 2.0 * np.pi / 20000000.0
+        print("tmpRadStep len(inSig)",tmpRadStep, len(inSig))
         outSig = []
         for i in range(0, len(inSig)):
             outSig.append(inSig[i] * (np.cos(i * tmpRadStep) + np.sin(i * tmpRadStep) * 1j))
@@ -928,6 +942,8 @@ class phy80211():
     def __procRxLegacySigDemod(self, inSig):
         if(len(inSig) >= 64):
             tmpSigFreq = p8h.procFftDemod(inSig[0:64])
+            # myConstellationPlot(tmpSigFreq)
+            
             tmpSigFreq = [tmpSigFreq[i] / self.rxChanL[i] for i in range(0, 64)]
             tmpSigFreq = p8h.procRmDcNonDataSc(tmpSigFreq, p8h.F.L)
             tmpSigLlr = p8h.procRemovePilots(tmpSigFreq)
@@ -945,7 +961,6 @@ class phy80211():
         if(isinstance(inSig, list) and len(inSig) > 480):
             self.rxSisoSig = inSig
             self.rxSampNum = len(inSig)
-            print(self.rxSampNum)
             procIndex = 0
             while(self.rxSampNum > (procIndex + 480)):
                 # find beginning of stf
@@ -962,6 +977,7 @@ class phy80211():
                     procIndex += 80
                     continue
                 ltfIndex = stfIndex + 80 + tmpSyncIndex + 10
+                print("stfIndex,ltfIndex",stfIndex,ltfIndex)
                 # estimate legacy channel
                 tmpCfoRadStep = self.rxCfo * 2 * np.pi / 20000000
                 legacySigSamples = [self.rxSisoSig[ltfIndex+i] * complex(np.cos(tmpCfoRadStep*i), np.sin(tmpCfoRadStep*i)) for i in range(0, 208)]
@@ -1056,6 +1072,7 @@ class phy80211():
             else:
                 tmpSig = tmpSig * num
             self.ssFinalSig.append(tmpSig)
+            
         return self.ssFinalSig
         
 
@@ -1351,18 +1368,35 @@ def procVhtVCompress(v, codeBookInfo = 0, ifDebug = False):
                 print(resType)
     return resValue, resType
 
+def myConstellationPlot(inSig):
+        x = []
+        y = [] 
+        for i in range(len(inSig)):
+            x.append(np.real(inSig))
+            y.append(np.imag(inSig))
+        plt.title("ConstellationPlot in ZL")
+        plt.xlim([-1.1, 1.1])
+        plt.ylim([-1.1, 1.1])
+        plt.scatter(x,y)
+        plt.show()
 
+
+def myPlot(inSigComp):
+    plt.plot(np.real(inSigComp))
+    plt.plot(np.imag(inSigComp))
+    plt.show()
 if __name__ == "__main__":
     phy = phy80211()
     pyToolPath = os.path.dirname(__file__)
     print(pyToolPath)
-    # addr = os.path.join(pyToolPath, "../tmp/sig80211GenMultipleSiso_1x1_0.bin")
+    
+    addr = os.path.join(pyToolPath, "../tmp/sig80211GenMultipleSiso_1x1_0.bin")
     # print("start")
     # addr = os.path.join(pyToolPath, "C:/Users/naton/Dropbox/sta0recording.bin")
     # print(addr)
 
-    # sig = p8h.procLoadComplexBin(addr)
+    sig = p8h.procLoadComplexBin(addr)
     # print("-----")
 
     # print("-----")
-    # phy.procSisoRx(sig)
+    phy.procSisoRx(sig)

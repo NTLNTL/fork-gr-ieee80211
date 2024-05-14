@@ -69,7 +69,7 @@ namespace gr {
 
       switch(d_sDemod)
       {
-        case DEMOD_S_RDTAG:
+        case DEMOD_S_RDTAG: //
         {
           // tags, which input, start, end
           get_tags_in_range(tags, 0, nitems_read(0) , nitems_read(0) + 1);
@@ -151,7 +151,7 @@ namespace gr {
         {
           if(d_nProc >= (80 + d_m.nLTF*80 + 80)) // STF, LTF, sig b
           {
-            nonLegacyChanEstimate(&inSig1[80], &inSig2[80]);
+            nonLegacyChanEstimate(&inSig1[80], &inSig2[80]);// ?[80] because skip VHT-STF
             vhtSigBDemod(&inSig1[80 + d_m.nLTF*80], &inSig2[80 + d_m.nLTF*80]);
             signalParserVhtB(d_sigVhtB20Bits, &d_m);
             dout<<"ieee80211 demodcu2, vht b len:"<<d_m.len<<", mcs:"<<d_m.mcs<<", nSS:"<<d_m.nSS<<", nSym:"<<d_m.nSym<<std::endl;

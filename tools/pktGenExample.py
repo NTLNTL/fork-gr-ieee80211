@@ -29,6 +29,7 @@ import time
 import os
 import mac80211
 import phy80211header as p8h
+import pktRxExample as rxp8h
 import phy80211
 
 def genMac80211UdpMPDU(udpPayload):
@@ -45,18 +46,18 @@ def genMac80211UdpMPDU(udpPayload):
         print("genMac80211UdpAmpduVht packet element is not str or bytes")
         return b""
 
-    print("udp packet")
+    print("udp packet",len(udpPacket),udpPacket[8:].hex())
     print(udpPacket.hex())
     ipv4Ins = mac80211.ipv4(43778,  # identification
                             64,  # TTL
                             "10.10.0.6",
                             "10.10.0.1")
     ipv4Packet = ipv4Ins.genPacket(udpPacket)
-    print("ipv4 packet")
+    print("ipv4 packet",len(ipv4Packet))
     print(ipv4Packet.hex())
     llcIns = mac80211.llc()
     llcPacket = llcIns.genPacket(ipv4Packet)
-    print("llc packet")
+    print("llc packet",len(llcPacket))
     print(llcPacket.hex())
     
     mac80211Ins = mac80211.mac80211(2,  # type
@@ -71,6 +72,7 @@ def genMac80211UdpMPDU(udpPayload):
                                     2704)  # sequence
     mac80211Packet = mac80211Ins.genPacket(llcPacket)
     print("mac packet: ", len(mac80211Packet))
+    print(mac80211Packet)
     print(mac80211Packet.hex())
     return mac80211Packet
 
@@ -173,31 +175,37 @@ def genMac80211UdpAmpduHt(udpPayloads):
 
 if __name__ == "__main__":
     pyToolPath = os.path.dirname(__file__)
-    udpPayload  = "123456789012345678901234567890"
+    udpPayload  = "123456789012345678901234567890" #30 bytes 
     udpPayload1 = "This is packet for station 001"
     udpPayload2 = "This is packet for station 002"
     udpPayload500  = "123456789012345678901234567890abcdefghijklmnopqrst" * 10
     udpPayload200R = bytearray(os.urandom(200))
 
-    phy80211Ins = phy80211.phy80211(ifDebug=False)
+    phy80211Ins = phy80211.phy80211(ifDebug=True)
 
     """multiple packets of different formats concatenate SISO """
     ssMultiList = []
     pkt = genMac80211UdpMPDU(udpPayload)
-    for mcsIter in range(0, 1):#8
-        phy80211Ins.genFromMpdu(pkt, p8h.modulation(phyFormat=p8h.F.L, mcs=mcsIter, bw=p8h.BW.BW20, nSTS=1, shortGi=False))
-        ssFinal = phy80211Ins.genFinalSig(multiplier = 12.0, cfoHz = 12321, num = 1, gap = True, gapLen = 1200)
-        ssMultiList.append(ssFinal)
-    # for mcsIter in range(0, 8):
-    #     phy80211Ins.genFromMpdu(pkt, p8h.modulation(phyFormat=p8h.F.HT, mcs=mcsIter, bw=p8h.BW.BW20, nSTS=1, shortGi=False))
-    #     ssFinal = phy80211Ins.genFinalSig(multiplier = 12.0, cfoHz = 0.0, num = 1, gap = True, gapLen = 1200)
+
+    # for mcsIter in range(0,1):#8
+    #     phy80211Ins.genFromMpdu(pkt, p8h.modulation(phyFormat=p8h.F.L, mcs=mcsIter, bw=p8h.BW.BW20, nSTS=1, shortGi=False))
+    #     ssFinal = phy80211Ins.genFinalSig(multiplier = 12.0, cfoHz = 0, num = 1, gap = True, gapLen = 1200)
     #     ssMultiList.append(ssFinal)
+        
+    for mcsIter in range(7, 8):#8
+        phy80211Ins.genFromMpdu(pkt, p8h.modulation(phyFormat=p8h.F.HT, mcs=mcsIter, bw=p8h.BW.BW20, nSTS=1, shortGi=False))
+        ssFinal = phy80211Ins.genFinalSig(multiplier = 12.0, cfoHz = 112233, num = 1, gap = True, gapLen = 1200)
+        ssMultiList.append(ssFinal)
+        
     # pkts = genMac80211UdpAmpduVht([udpPayload])
-    # for mcsIter in range(0, 9):
+    # print("len pkts vht", len(pkts))
+    # for mcsIter in range(0,1 ):#9
     #     phy80211Ins.genFromAmpdu(pkts, p8h.modulation(phyFormat=p8h.F.VHT, mcs=mcsIter, bw=p8h.BW.BW20, nSTS=1, shortGi=False), vhtPartialAid=0, vhtGroupId=0)
-    #     ssFinal = phy80211Ins.genFinalSig(multiplier = 12.0, cfoHz = 0.0, num = 1, gap = True, gapLen = 1200)
-    # #     ssMultiList.append(ssFinal)
+    #     ssFinal = phy80211Ins.genFinalSig(multiplier = 12.0, cfoHz = 122233, num = 1, gap = True, gapLen = 1200)
+    #     ssMultiList.append(ssFinal)
     phy80211Ins.genMultiSigBinFile(ssMultiList, os.path.join(pyToolPath, "../tmp/sig80211GenMultipleSiso"), True)
+
+
     """
             pwr avg of LTF is 0.03515625
             
@@ -205,14 +213,15 @@ if __name__ == "__main__":
     """
 
     # """multiple packets of different formats concatenate MIMO """
-    # ssMultiList = []
+    ssMultiList = []
     # pkt = genMac80211UdpMPDU(udpPayload)
-    # for mcsIter in range(8, 10): #8,18
+    # for mcsIter in range(1, 2): #8,16
     #     phy80211Ins.genFromMpdu(pkt, p8h.modulation(phyFormat=p8h.F.HT, mcs=mcsIter, bw=p8h.BW.BW20, nSTS=2, shortGi=False))
-    #     ssFinal = phy80211Ins.genFinalSig(multiplier = 12.0 * np.sqrt(2), cfoHz = 10, num = 1, gap = True, gapLen = 1200)
+    #     ssFinal = phy80211Ins.genFinalSig(multiplier = 12.0 * np.sqrt(2), cfoHz = 0, num = 1, gap = True, gapLen = 1200)
     #     ssMultiList.append(ssFinal)
+
     # pkts = genMac80211UdpAmpduVht([udpPayload])
-    # for mcsIter in range(0, 9):
+    # for mcsIter in range(1, 2): # (0,9)
     #     phy80211Ins.genFromAmpdu(pkts, p8h.modulation(phyFormat=p8h.F.VHT, mcs=mcsIter, bw=p8h.BW.BW20, nSTS=2, shortGi=False))
     #     ssFinal = phy80211Ins.genFinalSig(multiplier = 12.0 * np.sqrt(2), cfoHz = 0.0, num = 1, gap = True, gapLen = 1200)
     #     ssMultiList.append(ssFinal)
@@ -245,3 +254,7 @@ if __name__ == "__main__":
     # phy80211Ins.genFromAmpdu(b"", p8h.modulation(phyFormat=p8h.F.VHT, mcs=0, bw=p8h.BW.BW20, nSTS=2, shortGi=False), vhtPartialAid=0, vhtGroupId=0)
     # ssFinal = phy80211Ins.genFinalSig(multiplier = 18.0, cfoHz = 0.0, num = 10, gap = True, gapLen = 1200)
     # phy80211Ins.genSigBinFile(ssFinal, os.path.join(pyToolPath, "../tmp/sig80211GenVhtNdp"), True)
+
+
+    #tx - ht sig bits
+    # [1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0]

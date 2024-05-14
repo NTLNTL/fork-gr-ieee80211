@@ -70,7 +70,7 @@ class udp():
         self.destPort = dPort
         self.payloadBytes = b''
         self.protocol = socket.IPPROTO_UDP
-        self.len = 8
+        self.len = 8 
         self.checkSum = 0
 
     def __genCheckSum(self):
@@ -93,11 +93,11 @@ class udp():
         while (self.checkSum > 65535):
             self.checkSum = self.checkSum % 65536 + int(np.floor(self.checkSum / 65536))
         self.checkSum = 65535 - self.checkSum
-
     def genPacket(self, payloadBytes):
         self.payloadBytes = payloadBytes
         self.len = len(payloadBytes) + 8
-        self.__genCheckSum()
+        self.__genCheckSum() #4332
+        print("sour pack",struct.pack('>H',self.sourPort))
         return struct.pack('>HHHH',self.sourPort,self.destPort,self.len,self.checkSum)+self.payloadBytes
 
 # ipv4 generator, takes UDP as payload, give id,
@@ -140,7 +140,7 @@ class ipv4():
 
     def genPacket(self, payloadBytes):
         self.payload = payloadBytes     # payload, UDP packet
-        self.len = self.IHL * 4 + len(payloadBytes)
+        self.len = self.IHL * 4 + len(payloadBytes) #20 +38 = 58B
         self.__genCheckSum()
         return struct.pack('>HHHHHH', (self.ver * (16 ** 3) + self.IHL * (16 ** 2) + self.DSCP * 4 + self.ECN), self.len, self.ID, (self.flag * (2 ** 13) + self.fragOffset), (self.TTL * 256 + self.protocol), self.checkSum) + socket.inet_aton(self.sourIp) + socket.inet_aton(self.destIp) + self.payload
 
@@ -154,6 +154,7 @@ class llc():
         self.type = 0x0800  # 0x0800 for IP packet, 0x0806 for ARP
 
     def genPacket(self, payloadBytes):
+        print("here",len(struct.pack('>BBB', self.SNAP_DSAP, self.SNAP_SSAP, self.control) + struct.pack('>L', self.RFC1024)[:3] + struct.pack('>H', self.type) + payloadBytes))
         return struct.pack('>BBB', self.SNAP_DSAP, self.SNAP_SSAP, self.control) + struct.pack('>L', self.RFC1024)[:3] + struct.pack('>H', self.type) + payloadBytes
 
 class mac80211():
@@ -189,6 +190,7 @@ class mac80211():
         self.addr3 = addr3
         self.sc_frag = 0    # fixed, sequence control - frag number, no frag so to be 0
         self.sc_seq = seq     # sequence control - seq number
+
         self.sc = self.sc_frag + self.sc_seq << 4
         self.payloadBytes = b""
         self.fc = self.fc_protocol + (self.fc_type << 2) + (self.fc_subType << 4) + (self.fc_toDs << 8) + (self.fc_fromDs << 9) + (self.fc_frag << 10) + (self.fc_retry << 11) + (self.fc_pwr << 12) + (self.fc_more << 13) + (self.fc_protected << 14) + (self.fc_order << 15)
@@ -227,6 +229,7 @@ class mac80211():
                 tmpPacket += struct.pack('<H', self.QoS)   # only added when QoS packet
             tmpPacket += self.payloadBytes
             tmpPacket += struct.pack('<L',zlib.crc32(tmpPacket))
+
             print("cloud mac80211, gen pkt mac mpdu length: %d" % len(tmpPacket))
             return tmpPacket
         else:
@@ -362,6 +365,119 @@ def genAmpduVHT(payloads):
         print("cloud mac80211, gen ampdu vht: input type error")
         return b""
 
+
+
+class RxMac80211():
+    def __init__(self,inBitArray,debug):
+        self.dbFlag = debug
+        self.procIndex = 0 
+        self.fc_subType = self.Bi2Dec(inBitArray[4:8])
+
+
+        self.macLen = 28 # bytes 
+
+        if self.fc_subType == 0:
+            self.macLen = 24
+        elif self.fc_subType == 8:     #sub type, 8 = QoS Data, 0 = Data
+            self.macLen = 26
+        else:
+            print("ERROR:unsupport sub type [%d]"%(self.fc_subType))
+            return
+        self.macBits= inBitArray
+        self.llcBits = self.macBits[self.macLen*8:]
+        self.IpBits = self.llcBits[8*8:]
+        self.udpBits = self.IpBits[20*8:]
+
+        #output
+        self.udpPayload = ""
+    def rxMacStepsList(self):
+        self.__procRxMacMac()
+        self.__procRxLLCLLC()
+        self.__procRxIPIP()
+        self.__procRxUDP()
+        return self.udpPayload
+    def __procRxMacMac(self):
+        fc_protocol = self.Bi2Dec(self.macBits[0:2])
+        fc_type = self.Bi2Dec(self.macBits[2:4])
+        fc_subType = self.fc_subType
+        fc_toDs = self.Bi2Dec(self.macBits[8])
+        fc_fromDs = self.Bi2Dec(self.macBits[9])
+        fc_frag = self.Bi2Dec(self.macBits[10])
+        fc_retry = self.Bi2Dec(self.macBits[11])
+        fc_pwr = self.Bi2Dec(self.macBits[12])
+        fc_more = self.Bi2Dec(self.macBits[13])
+        fc_protected = self.Bi2Dec(self.macBits[14])
+        fc_order = self.Bi2Dec(self.macBits[15])
+        duration = self.Bi2Dec(self.macBits[16:32])
+        addr1 = self.Bi2hexSting(self.macBits[4*8:10*8])
+        addr2 = self.Bi2hexSting(self.macBits[10*8:16*8])
+        addr3 = self.Bi2hexSting(self.macBits[16*8:22*8])
+        sc_frag = self.Bi2Dec(self.macBits[22*8:22*8+4])
+        sc_seq = int(self.Bi2Dec(self.macBits[22*8:24*8])>>4)
+
+        if self.fc_subType == 0:
+            if self.dbFlag:print("|----------------------------------------------------MAC HEADER----------------------------------------------------|")
+            if self.dbFlag:print("Frame Control: |Protocol Ver - %d|Type - %d|Subtype - %d|" %(fc_protocol,fc_type,fc_subType))
+            if self.dbFlag:print("MAC Frame: |Duration - %d|Addr 1 - %s|Addr 2 - %s|Addr 3 - %s|sc_frag - %d|sc_seq - %d|"%(duration,addr1,addr2,addr3,sc_frag,sc_seq))
+        elif self.fc_subType == 8:
+            ht_control = None
+            if self.dbFlag:print()
+    def __procRxLLCLLC(self):
+        if self.dbFlag:print("|----------------------------------------------------LLC HEADER----------------------------------------------------|")
+        # print(self.llcBits)
+        tmpSSAP = self.llcBits[0:8]
+        print("tmpSSAP",self.Bi2hexSting(tmpSSAP))
+    def __procRxIPIP(self):
+        if self.dbFlag:print("|----------------------------------------------------IP HEADER-----------------------------------------------------|")
+        # print(self.IpBits)
+    def __procRxUDP(self):
+
+        udpHeader = struct.unpack(">HHHH", self.Bi2Byte(self.udpBits[0:8*8]))
+        sourPort = udpHeader[0]
+        destPort = udpHeader[1]
+        udpLen = udpHeader[2]
+        udpCheckSum = udpHeader[3]
+
+
+        tmpPayloadbit = self.udpBits[8*8:udpLen*8]
+        tmpB = ""
+        for i in range(int(len(tmpPayloadbit)/8)):
+            tmp = tmpPayloadbit[i*8:i*8+8]
+            tmpB+=chr(self.Bi2Dec(tmp))
+        if self.dbFlag:print("|----------------------------------------------------UDP HEADER----------------------------------------------------|")
+        # print(self.udpBits)
+        self.udpPayload = tmpB
+        # print("udp Payload:",tmpB)
+
+    def Bi2Dec(self,inBi):
+        tmpSum = 0
+        if isinstance(inBi, list):
+            for i in range(len(inBi)-1,-1,-1):
+                if inBi[i] == 1:
+                    tmpSum+= (1<<i)
+        else:
+            tmpSum = inBi
+        return tmpSum
+    def Bi2hexSting(self,inBi):
+        tmpOut = ""
+        tmpIpv6 = ""
+        for i in range(int(len(inBi)/8)): #six bytes for addr field 
+            tmp = hex(self.Bi2Dec(inBi[i*8:i*8+8]))[2:].rjust(2,'0')
+            tmpOut += tmp
+        tmpIpv6 = ":".join([tmpOut[i:i+2] for i in range(0, len(tmpOut),2)])
+        return tmpIpv6
+    def Bi2Byte(self,inBi): #the input of unpack is byte, the ouptut of this function is dec number
+        tmpOut = b""
+        if isinstance(inBi, list):
+            
+            for i in range(int(len(inBi)/8)):
+                tmp = self.Bi2Dec(inBi[i*8:i*8+8])
+                tmpOut += tmp.to_bytes(1,byteorder='big')
+            return tmpOut
+            # return (tmp.to_bytes(tmp,byteorder='big'))
+            
+        else:
+            return "ERROR: in Bi2Byte2Dec"
 if __name__ == "__main__":
     mac80211Ins = mac80211(2,  # type
                                      8,  # sub type, 8 = QoS Data

@@ -940,23 +940,3 @@ def pktParser(pkt):
 
 if __name__ == "__main__":
     pass
-    # chan0 = []
-    # fWaveComp = open("/home/cloud/sdr/gr-ieee80211/tools/cmu_chan0.bin", 'rb')
-    # for i in range(0,128):
-    #     tmpR = struct.unpack('f', fWaveComp.read(1) + fWaveComp.read(1) + fWaveComp.read(1) + fWaveComp.read(1))[0]
-    #     tmpI = struct.unpack('f', fWaveComp.read(1) + fWaveComp.read(1) + fWaveComp.read(1) + fWaveComp.read(1))[0]
-    #     chan0.append(tmpR + tmpI * 1j)
-    # fWaveComp.close()
-    # nTx = 2
-    # nRx = 1
-    # # compute feedback
-    # ltfSym = []
-    # ltfSym.append(p8h.procRemovePilots(p8h.procToneDescaling(p8h.procRmDcNonDataSc(p8h.procFftDemod(chan0[0:64]), p8h.F.VHT), p8h.C_SCALENTF_LTF_VHT[p8h.BW.BW20.value], nTx)))
-    # ltfSym.append(p8h.procRemovePilots(p8h.procToneDescaling(p8h.procRmDcNonDataSc(p8h.procFftDemod(chan0[64:128]), p8h.F.VHT), p8h.C_SCALENTF_LTF_VHT[p8h.BW.BW20.value], nTx)))
-    # vFb1 = p8h.procVhtChannelFeedback(ltfSym, p8h.BW.BW20, nTx, nRx)
-    # for i in range(0, len(vFb1)):
-    #     tmpAngle, tmpType = procVhtVCompressDebug(vFb1[i], 1, True)
-    #     print(procVhtVRecover(2, 1, tmpAngle, 1))
-    #     print(procVhtVCompressDebugVt(vFb1[i]))
-    #     print("------------------------------------------")
-    #     print("")
