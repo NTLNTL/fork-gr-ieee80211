@@ -137,17 +137,17 @@ if __name__ == "__main__":
                         pre5BStr = str(tmpMacPaylaod[0:10], 'UTF-8')
                         if(pre5BStr == "cloudchan0" and (rxCount & 1)==0):
                             print(pre5BStr)
-                            chan0B = tmpMacPaylaod[10:]
+                            chan0B = tmpMacPaylaod[10:1034]
                             rxCount = rxCount | 1
                         if(pre5BStr == "cloudchan1" and (rxCount & 2)==0):
                             print(pre5BStr)
-                            chan1B = tmpMacPaylaod[10:]
+                            chan1B = tmpMacPaylaod[10:1034]
                             rxCount = rxCount | 2
         except:
             print("send ndp again")
             grSocket.sendto(grNdpPkt, phyTxAddr)
 
-    if(len(chan0B) == 1024 and len(chan1B) == 1024):
+    if(len(chan0B) >= 1024 and len(chan1B) >= 1024):
         chan0 = []
         chan1 = []
         for i in range(0, 128):
@@ -201,16 +201,13 @@ if __name__ == "__main__":
         bfQForFft = [np.ones_like(bfQNormd[0])] * 3 + bfQNormd[0:28] + [
             np.ones_like(bfQNormd[0])] + bfQNormd[28:56] + [np.ones_like(bfQNormd[0])] * 4
 
-        bfQPktForGr0, bfQPktForGr1 = phy80211.genPktGrBfQ(bfQForFft)
-        grSocket.sendto(bfQPktForGr0, phyTxAddr)
-        time.sleep(0.5)
-        grSocket.sendto(bfQPktForGr1, phyTxAddr)
-        time.sleep(0.5)
+        bfQPktForGr = phy80211.genPktGrBfQ(bfQForFft)
+        grSocket.sendto(bfQPktForGr, phyTxAddr)
         pkt0 = genMac80211UdpAmpduVht(["1234567 packet for station 000"])
         pkt1 = genMac80211UdpAmpduVht(["7654321 packet for station 111"])
         grMuPkt = phy80211.genPktGrDataMu(pkt0, p8h.modulation(p8h.F.VHT, 0, p8h.BW.BW20, 1, False), pkt1, p8h.modulation(p8h.F.VHT, 0, p8h.BW.BW20, 1, False), 2)
         print("gr pkt len %d" % len(grMuPkt))
-        for i in range(0, 10):
+        for i in range(0, 1000):
             grSocket.sendto(grMuPkt, phyTxAddr)
-            time.sleep(1)
+            time.sleep(0.01)
 
