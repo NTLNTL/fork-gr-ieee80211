@@ -35,8 +35,13 @@ class dephy80211():
         self.LSigBits = []
         self.mdpuLen = 0
 
+        #rx vhtSigB field 
+        self.vhtSigBBits = None
+        self.calVhtSigBCrc = 0 
+
         #rx ht sig field 
         self.aggre = 0
+
 
         #create rx demod class from received pkta
         self.demod = None
@@ -53,7 +58,7 @@ class dephy80211():
         self.rxDatabits = []
         self.nSS = 1 
         self.mcs = 0 
-        self.phyFormate = None
+        self.phyFormat = None
 
         #rx phy bits out 
         self.phyBits = []
@@ -67,35 +72,44 @@ class dephy80211():
         self.__procRxLegacyChanEst()
         self.__procRxLegacySigSym()
         self.__procRxPktFormat()
-        if self.nSS == 1:
+        if self.nSS == 1: # siso 
             if self.phyFormat == p8h.F.L:
                 self.__procRxSisoData()
             elif self.phyFormat == p8h.F.VHT:
-                self.__procRxChanUpdate
+                self.__procRxChanUpdate()
                 self.__procRxParseVHTSigB()
                 self.__procRxSisoData()
             elif self.phyFormat == p8h.F.HT:
                 self.__procRxChanUpdate()
                 self.__procRxSisoData()
         else:
-            pass # more than one ht-LTF
-
-        
-
-
-        
-
-
-
+            pass # more than one ht-LTF or vht-LTF 
 
         return self.rxDatabits
     
 
     def __procRxParseVHTSigB(self):
-        #need to decode VHT-SIGB
-        pass
-
-
+        
+        tmpSigBMod = p8h.modulation(phyFormat=self.phyFormat, mcs=0, bw=p8h.BW.BW20, nSTS=1, shortGi=False) #mcs set to 0 for VHTSigB interleave
+        tmpRxVhtBSym = self.timeInSig[self.legacyStfIndex+(self.nSymProcIdx*80):self.legacyStfIndex+(self.nSymProcIdx*80)+80]
+        tmp = []
+        for nSampleIter in range(80):
+            tmp.append(tmpRxVhtBSym[nSampleIter]*complex(np.cos(((self.nSymProcIdx*80)+nSampleIter)*self.cfoRad), np.sin(((self.nSymProcIdx*80)+nSampleIter)*self.cfoRad)))
+        # remove CP 
+        tmpSymTime = tmp[16:80]
+        tmpSigFreq = p8h.procFftDemod(tmpSymTime)
+        tmpSigFreq = self.procCompChan(tmpSigFreq) #64
+        tmpSigFreq = p8h.procRmDcNonDataSc(tmpSigFreq, self.phyFormat)
+        tmpSigFreq = self.procPilotTrack(tmpSigFreq,p8h.C_PILOT_VHT[p8h.BW.BW20.value])
+        tmpLlr = p8h.procRemovePilots(tmpSigFreq) 
+        tmpSigBMod.nSym = 1 # for interleave
+        tmpCoded = self.procDeinterleave(list(np.real(tmpLlr)),tmpSigBMod)
+        tmpVhtSigBBits = p8h.procViterbiDecoder(tmpCoded,26, p8h.CR.CR12)
+        self.calVhtSigBCrc = p8h.genBitBitCrc8(tmpVhtSigBBits[0:20]) #crc bits for vhtSigB calculated but not verify in service 
+        self.vhtSigBBits = tmpVhtSigBBits 
+        self.mdpuLen = self.bi2Deci(self.vhtSigBBits[0:17]) * 4
+        if self.ifdb: print("DEBUG:VHT sigB bits", tmpVhtSigBBits,self.calVhtSigBCrc)
+        
     def __procRxLegacyStfTrigger(self):
         #do auto cor 
         #return index that autoOut > threshold 
@@ -201,15 +215,20 @@ class dephy80211():
         tmpSymFreq = p8h.procFftDemod(tmpSymTime)
         tmpChan = [0 if tmpLtfOri[i] == 0 else tmpSymFreq[i]/tmpLtfOri[i] for i in range(len(tmpLtfOri)) ]
         self.chanInfoLtf = tmpChan
+        self.nSymProcIdx += 1
         print("channel updated")
 
     def __procRxSisoData(self):
         if self.ifdb:print("DEBUG: final format:",self.phyFormat)
-        if self.ifdb:print("DEBUG: final mcs:",self.mcs)        
+        if self.ifdb:print("DEBUG: final mcs:",self.mcs) 
         self.demod = p8h.modulation(self.phyFormat, self.mcs, bw=p8h.BW.BW20, nSTS=self.nSS, shortGi=False)
-        self.demod.procPktLenNonAggre(self.mdpuLen)
 
-        print("self.nSymProcIdx",self.nSymProcIdx) #siso doesn't utilize HT-STF and HT LTF(s)
+        if self.phyFormat ==  p8h.F.L or self.phyFormat ==  p8h.F.HT: 
+            self.demod.procPktLenNonAggre(self.mdpuLen)
+        else:
+            self.demod.procPktLenAggre(self.mdpuLen)
+            print("in__procRxSisoData VHT", p8h.F.VHT ,self.mdpuLen,self.demod.nSym )
+                # self.nSymProcIdx start of data symbol 
         if self.phyFormat == p8h.F.L:
             self.nSymProcIdx = 5
         elif  self.phyFormat == p8h.F.HT:
@@ -218,11 +237,10 @@ class dephy80211():
             self.nSymProcIdx = 10
 
         self.rxDataSym = self.timeInSig[self.legacyStfIndex+(self.nSymProcIdx*80):self.legacyStfIndex+(self.nSymProcIdx*80)+self.demod.nSym*80]
-        print("data sample length",len(self.rxDataSym), self.demod.nSym)
+
         # myPlot(self.rxDataSym)
-        # self.demod.nSym = 1
         tmpPilot = p8h.C_PILOT_L
-        for nSymIter in range(self.demod.nSym):#self.demod.nSym
+        for nSymIter in range(self.demod.nSym):
             tmpSym = self.rxDataSym[nSymIter*80:nSymIter*80+80]
             tmp = []
             # compensate cfo 
@@ -253,19 +271,22 @@ class dephy80211():
         # if self.ifdb:print("DEBUG: self.rxInterleaveBits len:",len(self.rxInterleaveBits))
         # if self.ifdb:print("DEBUG: self.rxInterleaveBits: \n", self.rxInterleaveBits)
 
-        self.rxCodedBits = self.procDeinterleave()
+        self.rxCodedBits = self.procDeinterleave(self.rxInterleaveBits,self.demod)
         if self.ifdb:print("DEBUG: self.rxCodedBits len:",len(self.rxCodedBits))
-        print("compare coded",compare( [1 if np.real(each)>0 else 0  for each in self.rxCodedBits ],txbits.htMcs0CodedBits))
-
-        
+        # print("compare coded",compare( [1 if np.real(each)>0 else 0  for each in self.rxCodedBits ],txbits.htMcs0CodedBits))
         # if self.ifdb:print("DEBUG: self.rxCodedBits: \n", self.rxCodedBits)
         
         self.rxScrambleBits = p8h.procViterbiDecoder(self.rxCodedBits,self.demod.nDBPS*self.demod.nSym,self.demod.cr)
+
         if self.ifdb:print("DEBUG: self.rxScrambleBits len:",len(self.rxScrambleBits))
         # if self.ifdb:print( "DEBUG: self.rxScrambleBits",self.rxScrambleBits)
 
         self.rxDatabits = self.PrcoDeScrambleBits()
-        if self.ifdb:print("DEBUG: self.rxDatabits len:", len(self.rxDatabits) )
+        print("data compare", compare(self.rxDatabits,txbits.vhtDataBitsMcs7))
+
+
+
+        if self.ifdb:print("DEBUG: self.rxDatabits len:", len(self.rxDatabits),self.rxDatabits[0:16]   )
         # if self.ifdb:print("DEBUG: self.rxDatabits \n", self.rxDatabits )
     def PrcoDeScrambleBits(self):
         tmpScrambler = 0
@@ -281,31 +302,44 @@ class dephy80211():
 
             tmpDeScrambledBits.append(tmpFeedback ^ self.rxScrambleBits[i])
             tmpScrambler = ((tmpScrambler << 1) & 0x7e) | tmpFeedback  #0x7e - 126
+        print("self.mdpuLen",self.mdpuLen)
+        # return tmpDeScrambledBits[16:self.mdpuLen * 8 +16]#removing 16 serving bits and 6 tail bits  
 
-        return tmpDeScrambledBits[16:self.mdpuLen * 8 +16]#removing 16 serving bits and 6 tail bits  
-
-    def procDeinterleave(self):
+        if self.phyFormat == p8h.F.VHT:
+            if tmpDeScrambledBits[8:16] == self.calVhtSigBCrc:
+                print("vht SigB crc check pass")
+                tmpDeScrambledBits = tmpDeScrambledBits[16:]
+            else:
+                print("ERROR: vht SigB crc check fail")
+                tmpDeScrambledBits = []
+        else: 
+            tmpDeScrambledBits = tmpDeScrambledBits[16:self.mdpuLen * 8 +16]#removing 16 serving bits and 6 tail bits  
+        return tmpDeScrambledBits
+        # legacy and ht: data bits + tail + padding -> scramble
+        # vht: vht gets data bits scrambled first then add tail bits and then coded
+    def procDeinterleave(self,interleavedBits,mod):
+        
         if self.phyFormat == p8h.F.L:
-            tmpDeinterleaveBits = [0] * self.demod.nSym * self.demod.nCBPS
-            print("in procDeinterleave",self.demod.phyFormat, self.demod.cr, self.demod.nSym * self.demod.nCBPS, self.demod.nCBPS)
-            s = int(max(1, self.demod.nBPSCS/2))
-            for symIter in range(self.demod.nSym):
-                for j in range(self.demod.nCBPS):
-                    i = int( int(s * np.floor(j/s)) +  int((j+np.floor(16*j/self.demod.nCBPS))%s))  
-                    k = int(16 * i - (self.demod.nCBPS - 1) * int(np.floor(16 * i /self.demod.nCBPS)))
-                    tmpDeinterleaveBits[symIter*self.demod.nCBPS+k] =  self.rxInterleaveBits[symIter*self.demod.nCBPS+j]
+            tmpDeinterleaveBits = [0] * mod.nSym * mod.nCBPS
+            print("in procDeinterleave",mod.phyFormat, mod.cr, mod.nSym * mod.nCBPS, mod.nCBPS)
+            s = int(max(1, mod.nBPSCS/2))
+            for symIter in range(mod.nSym):
+                for j in range(mod.nCBPS):
+                    i = int( int(s * np.floor(j/s)) +  int((j+np.floor(16*j/mod.nCBPS))%s))  
+                    k = int(16 * i - (mod.nCBPS - 1) * int(np.floor(16 * i /mod.nCBPS)))
+                    tmpDeinterleaveBits[symIter*mod.nCBPS+k] =  interleavedBits[symIter*mod.nCBPS+j]
             
-        elif self.phyFormat== p8h.F.HT:
-            print("in procDeinterleave ht ")
-            tmpDeinterleaveBits =  [0] * self.demod.nSym * self.demod.nCBPSS
-            s = int(max(1, self.demod.nBPSCS/2))
-            for symIter in range(self.demod.nSym):#self.demod.nSym
+        elif self.phyFormat== p8h.F.HT or self.phyFormat== p8h.F.VHT:
+            print("in procDeinterleave ht ",mod.nSym, mod.cr,mod.nCBPSS)
+            tmpDeinterleaveBits =  [0] * mod.nSym * mod.nCBPSS
+            s = int(max(1, mod.nBPSCS/2))
+            for symIter in range(mod.nSym):#mod.nSym
                 if self.nSS == 1:
-                    for r in range(self.demod.nCBPSS):
+                    for r in range(mod.nCBPSS):
                         j = r
-                        i = s * int(np.floor(j/s)) + (j+ int(np.floor(self.demod.nIntlevCol*j/self.demod.nCBPSS)))%s
-                        k = self.demod.nIntlevCol * i - (self.demod.nCBPSS - 1 ) * int( np.floor(i / self.demod.nIntlevRow))
-                        tmpDeinterleaveBits[symIter*self.demod.nCBPSS+k] = self.rxInterleaveBits[symIter*self.demod.nCBPSS+r]
+                        i = s * int(np.floor(j/s)) + (j+ int(np.floor(mod.nIntlevCol*j/mod.nCBPSS)))%s
+                        k = mod.nIntlevCol * i - (mod.nCBPSS - 1 ) * int( np.floor(i / mod.nIntlevRow))
+                        tmpDeinterleaveBits[symIter*mod.nCBPSS+k] = interleavedBits[symIter*mod.nCBPSS+r]
         return tmpDeinterleaveBits  
     def procSymQamToLlr(self):
         tmpBiOut = []
@@ -372,7 +406,7 @@ class dephy80211():
         # print("checking", compare(tmpBiOut,tx_inter_5))
         return tmpDeMapping
     
-    def __procRxPktFormat(self):#here
+    def __procRxPktFormat(self):
         tmpSig1 = self.timeInSig[self.legacyStfIndex+400:self.legacyStfIndex+400+80]
         tmpSig2 = self.timeInSig[self.legacyStfIndex+480:self.legacyStfIndex+480+80]
         if(sum(self.LSigBits[0:17])%2 == self.LSigBits[17] ): #parity check for Sig field
@@ -388,7 +422,7 @@ class dephy80211():
                 if (self.htVhtCrc8Check(tmpHtSigBits)):
                     if self.ifdb:print("DEBUG: HT-SIG bits:",tmpHtSigBits)
                     self.pilotPIdx = 3
-                    print("htCrc8Check pass")
+                    print("ht sig fieldhtCrc8Check pass")
                     print("len HT", self.bi2Deci(tmpHtSigBits[8:24]))
                     self.mdpuLen = self.bi2Deci(tmpHtSigBits[8:24])
                     self.phyFormat = p8h.F.HT 
@@ -396,8 +430,8 @@ class dephy80211():
 
                 if (self.htVhtCrc8Check(tmpVhtSigBits)):
                     if self.ifdb:print("DEBUG: VHT-SIGA  bits:",tmpHtSigBits)
-                    print("vhtCrc8Check pass")
-                    self.pilotPIdx = 4
+                    print("vht sigA field vhtCrc8Check pass")
+                    self.pilotPIdx = 3
                     self.phyFormat = p8h.F.VHT
                     self.mcs = self.bi2Deci(tmpVhtSigBits[28:32])
 
@@ -406,11 +440,11 @@ class dephy80211():
                     self.pilotPIdx = 1 
                     self.phyFormat = p8h.F.L
             else: #demodulate legacy mcs > 0 
-                #??how to chexk bandwidth parameter 
                 self.phyFormat = p8h.F.L
                 self.pilotPIdx = 1 
                 
             self.nSS = int(np.floor(self.mcs / 8)) + 1
+
         else:
             return "ERROR: legacy Sig parity check fail"
             
@@ -456,11 +490,10 @@ class dephy80211():
             return True
         else: return False
 
-    def proRxSigSym(self,inSym,mode): # inSym 80 samples 
-        outBits = None
+    def proRxSigSym(self,inSym,mode): # inSym 80 samples  #L-SIG, HT-SIG, VHT-SIGA
         tmp = []
         # compensate cfo 
-        print("self.symProcIdx in procRxSig",self.nSymProcIdx)
+        print("self.symProcIdx in procRxSig, self.nSymProcIdx and self.pilotPIdx ",self.nSymProcIdx,self.pilotPIdx )
         
         for i in range(len(inSym)):
             tmp.append(inSym[i]*complex(np.cos(i*self.cfoRad+(self.nSymProcIdx*80)), np.sin(i*self.cfoRad+ (self.nSymProcIdx*80)))) 
@@ -473,7 +506,6 @@ class dephy80211():
         tmpSigFreq = p8h.procRmDcNonDataSc(tmpSigFreq, p8h.F.L)
         tmpSigFreq = self.procPilotTrack(tmpSigFreq,p8h.C_PILOT_L)
         tmpSigLlr = p8h.procRemovePilots(tmpSigFreq)
-        # myConstellationPlot(tmpSigFreq)
         
         
         
@@ -501,7 +533,7 @@ class dephy80211():
 
             self.mcs = p8h.C_LEGACY_RATE_BIT.index(self.LSigBits[0:4])
             self.mdpuLen = self.bi2Deci(self.LSigBits[5:17])
-            if self.ifdb:print("DEBUG: legacy sig mpdu length:",self.mdpuLen)
+            if self.ifdb:print("DEBUG: legacy length:",self.mdpuLen)
             if self.ifdb:print("DEBUG: legacy mcs:",self.mcs)
         else:    
             print("ERROR: legacy sig Parity Bits error")
@@ -610,7 +642,6 @@ if __name__ == "__main__":
 
 
     # MAC       
-    
     # phyBits = [1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 1, 0, 0, 0, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 1, 1, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 0, 1, 0, 0, 1, 1, 1, 0, 0, 0, 1, 1, 0, 1, 1, 1, 0, 1, 1, 0, 1, 0, 1, 0, 0, 0, 0, 1, 1, 1, 0, 0, 1, 0, 1, 1, 1, 1, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 0, 0, 0, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 1, 1, 1, 1, 0, 0, 1, 0, 1, 1, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 1, 1, 0, 0, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 0, 1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 1, 1, 0, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 0, 0, 0, 0, 1, 0, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 0, 1, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 1, 0, 1, 0, 1, 1, 1, 1, 0, 0, 1, 1, 1, 0, 0, 0, 1, 1, 1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 0, 1, 1, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 1, 0, 0, 0, 1, 1, 1, 0, 1, 1, 1, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 0, 1, 1, 1, 0, 0, 0, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 1, 0, 1, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 0, 1, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 1, 1, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 1, 1, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 1, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0, 1, 1, 0, 1, 0, 0, 0, 1, 0, 0, 1, 1, 0, 1, 1, 1, 0, 1, 0, 0, 1, 1, 1, 0, 1, 1, 0, 0, 0, 0, 1, 0, 1, 1, 0, 1, 1, 1, 1, 1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 1, 0, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0, 1, 1, 1, 1, 0, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1, 0, 1, 1, 1, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 1, 0, 0, 0, 1, 1, 1, 0, 1, 1, 1, 0, 0, 1, 0, 1, 1, 1, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 1, 0, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 0, 0, 1, 1, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 1, 1, 0, 1, 0, 1, 0, 1, 1, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 1, 1, 0, 1, 1, 1, 0, 0, 0, 1, 1, 0, 1, 1, 0, 0, 0, 1, 1, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 1, 1, 0, 1, 1, 0, 0, 0, 1, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 1, 0, 1, 1, 0, 1, 1, 0, 1, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 1, 1, 0, 0, 1, 0, 0, 0, 1, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 1, 1, 1, 0, 1, 0, 1, 0, 0, 0, 0, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 1, 1, 0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 0, 1, 1, 0, 1, 1, 1, 0, 0, 1, 0, 1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0, 1, 1, 0, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 1, 1, 1, 0, 1, 1, 0, 0, 0, 0, 1, 0, 1, 0, 1, 1, 0, 1, 1, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 1, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0, 0, 0, 1, 0, 0, 1, 1, 0, 1, 1, 1, 1, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1, 1, 0, 1, 1, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 1, 1, 0, 0, 1, 0, 0, 1, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 1, 0, 1, 0, 1, 0, 0, 1, 1, 1, 0, 0, 0, 1, 1, 0, 1, 0, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 1, 1, 0, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 0, 1, 0, 1, 1, 1, 1, 0, 0, 1, 0, 1, 1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1, 0, 1, 1, 0, 0, 0, 1, 1, 1, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 0, 1, 1, 1, 0, 1, 0, 1, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 1, 0, 0, 1, 1, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0, 1, 1, 1, 1, 0, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 1, 0, 0, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 0, 1, 0, 1, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 1, 0, 1, 1, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 1, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 0, 0, 0, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 0, 1, 0, 0, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0, 0, 1, 1, 1, 0, 1, 0, 1, 1, 0, 0, 1, 1, 1, 1]
     # upperlayer = mac.RxMac80211(phyBits, debug = True)
     # msg = upperlayer.rxMacStepsList()
@@ -618,15 +649,3 @@ if __name__ == "__main__":
     
     
     
-    #tx ht sig
-    #[0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0]
-    #[0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0]
-    
-    #VHT SIG A mcs1
-    #[0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-    #[0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-    
-
-    # input = [-1.0444180550565167, -0.9947426356225831, -1.0401742178810855, -1.031713245740612, 1.0370877177155429, 0.9913488535371258, -0.9888611001366912, 1.0350719123748728, 1.0241458393922958, 1.013705415285691, 1.0455470602091317, 1.0437183787661155, -1.023272836151735, -1.0325727413044568, 1.015976243553799, -0.9996854183591589, 0.9952186351218241, 1.0077086309153938, -0.977323838476975, -1.0281748240680866, -1.0159761901837367, -1.0024165611893632, -0.9611991904296747, -0.9729657812260926, -0.9764090775993102, -0.9570488677666111, -0.9564583109545355, -1.015800732350474, -0.9667693199912082, -1.0350181092291935, -1.0408546761550646, -1.0039115477276974, -0.9985348557220102, -0.9838687472656028, -1.0349162084956103, -1.0243422431655052, -0.9618928728978773, -0.9978311163549579, -0.980464476975575, -0.9696386500576356, -0.9797858905983382, -0.9911452419586753, -1.0077085980739628, -1.0196368231112465, -0.9696116108768597, -0.9796382879214189, 0.9602369107790859, 0.9604122669883367,-1.0451372819658478, 0.9367985018516418, 0.9804009406325066, 0.9787893806065077, 0.9791310425454565, 0.9349056125167476, -1.041086094375738, -1.0185353898205634, -0.9871579046266233, 1.0057449478757279, 1.0579690583980519, -0.9824829813661166, 1.08100180514853, 1.0815394415078197, 1.0743864337353985, 1.0152352820884982, -1.051797883094749, -1.0685512247040998, -1.018355715572064, 0.9786841225320102, 0.9796761569749066, -1.0603788260359572, 0.9623195330104091, 0.9941083499298758, -0.9982835380364837, -0.9586429111149045, 1.0136861829357897, -0.9813481975427704, -0.9218506267778753, -0.9787987407862584, 1.0657250863459635, 1.0140265302206024, 0.9414717425930793, 0.9263920305955843, 0.979113482717666, -1.0799858708751677, -1.0179398543557732, 0.9837949183728565, 0.9903142001665646, 0.9960693125930508, -0.9962709192704778, -0.9904095027225215, -0.9837910955713197, -0.9804009348933734, -0.9216969338563331, -0.9253324765844163, -0.9393278459040605, -0.9558574020548589] 
-    # outBits = p8h.procViterbiDecoder(input, 48, p8h.CR.CR12)
-    # print("output",outBits )

@@ -590,7 +590,7 @@ class phy80211():
                 p8h.C_SCALENTF_SIG_VHT_B[self.m.bw.value], self.m.nSS)))
         for ssIter in range(0, self.m.nSS):
             if self.ifdb: print("ss %d VHT signal B: %d" % (ssIter, len(self.ssVhtSigB[ssIter])))
-            if self.ifdb: print(self.ssVhtSigB[ssIter])
+            # if self.ifdb: print(self.ssVhtSigB[ssIter])
 
     def __genVhtSignalBMu(self):
         self.ssVhtSigB = []
@@ -671,6 +671,7 @@ class phy80211():
             if self.ifdb: print("vht data apep len: %d, psdu len: %d, pad eof: %d, pad octets: %d, pad bits: %d, totoal bits: %d" % (self.m.ampduLen, self.m.psduLen, self.m.nPadEof, self.m.nPadOctet, self.m.nPadBits, (self.m.nSym * self.m.nDBPS)))
             # convert MAC data
             tmpAmpduBits = []
+            print("in __genDataBits", len(self.ampdu))
             for each in self.ampdu:
                 for i in range(0,8):
                     tmpAmpduBits.append((each>>i) & (1))
@@ -789,7 +790,7 @@ class phy80211():
             if self.ifdb: print(ssItr, ssItr, ssItr)
         for each in self.ssSymbols:
             if self.ifdb: print("constellation data", len(each))
-            if self.ifdb: print("constellation data first", each)
+            # if self.ifdb: print("constellation data first", each)
             # if self.ifdb: print([np.sqrt(42) * item for item in each])
             # if self.ifdb: print(each)
             # myConstellationPlot(each)
@@ -853,7 +854,7 @@ class phy80211():
                 tmpPilotPIdx = (tmpPilotPIdx + 1) % 127
                 
                 if(not(self.m.phyFormat == p8h.F.L)):
-                    tmpPilot = tmpPilot[1:] + [tmpPilot[0]] #?
+                    tmpPilot = tmpPilot[1:] + [tmpPilot[0]] 
 
     def __genOfdmSignalNdp(self):
         self.ssPhySig = []

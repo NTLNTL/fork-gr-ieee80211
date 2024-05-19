@@ -487,6 +487,7 @@ class modulation:
             self.legacyLen = int((self.txTime - 20)/4) * 3 - 3
         elif (self.phyFormat == F.VHT):
             if(ampduLen > 0):
+               
                 self.ampduLen = ampduLen  # ampdu len
                 self.nSym = mSTBC * int(np.ceil((8 * self.ampduLen + nService + nTail * self.nES) / (mSTBC * self.nDBPS)))
                 self.psduLen = int(np.floor((self.nSym * self.nDBPS - nService - nTail * self.nES) / 8))
@@ -500,6 +501,7 @@ class modulation:
                 else:
                     self.txTime = int( 20 + 8 + 4 + self.nLtf * 4 + 4 + self.nSym * 4 )
                 self.legacyLen = int((self.txTime - 20)/4) * 3 - 3
+                print("self.nSym = 42 - 10?",self.legacyLen,self.txTime, self.nSym)
             else:
                 # NDP
                 self.ampduLen = 0
@@ -1187,7 +1189,6 @@ def procFftDemod(inSig):
         return []
 
 def procRmDcNonDataSc(inSig, phyFormat):
-    print("procRmDcNonDataSc phyFormat",phyFormat)
     if(isinstance(inSig, list) and isinstance(phyFormat, F)):
         if(len(inSig) in [64, 128, 256]):
             # fft shift
