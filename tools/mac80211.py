@@ -96,8 +96,8 @@ class udp():
     def genPacket(self, payloadBytes):
         self.payloadBytes = payloadBytes
         self.len = len(payloadBytes) + 8
+
         self.__genCheckSum() #4332
-        print("sour pack",struct.pack('>H',self.sourPort))
         return struct.pack('>HHHH',self.sourPort,self.destPort,self.len,self.checkSum)+self.payloadBytes
 
 # ipv4 generator, takes UDP as payload, give id,
@@ -196,7 +196,7 @@ class mac80211():
         self.fc = self.fc_protocol + (self.fc_type << 2) + (self.fc_subType << 4) + (self.fc_toDs << 8) + (self.fc_fromDs << 9) + (self.fc_frag << 10) + (self.fc_retry << 11) + (self.fc_pwr << 12) + (self.fc_more << 13) + (self.fc_protected << 14) + (self.fc_order << 15)
         self.eofPaddingSf = [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
         self.eofPaddingSf = self.eofPaddingSf + self.__macBitCrc8(self.eofPaddingSf) + [0, 1, 1, 1, 0, 0, 1, 0] #0x4e
-
+        print("self.eofPaddingSf",self.eofPaddingSf)
     def __macBitCrc8(self, bitsIn):
         c = [1] * 8
         for b in bitsIn:
@@ -373,7 +373,7 @@ class RxMac80211():
         self.procIndex = 0 
         self.fc_subType = self.Bi2Dec(inBitArray[4:8])
 
-
+        print("self.fc_subType",self.fc_subType)
         self.macLen = 28 # bytes 
 
         if self.fc_subType == 0:
@@ -383,6 +383,7 @@ class RxMac80211():
         else:
             print("ERROR:unsupport sub type [%d]"%(self.fc_subType))
             return
+        
         self.macBits= inBitArray
         self.llcBits = self.macBits[self.macLen*8:]
         self.IpBits = self.llcBits[8*8:]
@@ -431,7 +432,7 @@ class RxMac80211():
         if self.dbFlag:print("|----------------------------------------------------IP HEADER-----------------------------------------------------|")
         # print(self.IpBits)
     def __procRxUDP(self):
-
+        print("self.udpBits",self.udpBits)
         udpHeader = struct.unpack(">HHHH", self.Bi2Byte(self.udpBits[0:8*8]))
         sourPort = udpHeader[0]
         destPort = udpHeader[1]
@@ -440,6 +441,7 @@ class RxMac80211():
 
 
         tmpPayloadbit = self.udpBits[8*8:udpLen*8]
+        print("tmpPayloadbit",tmpPayloadbit)
         tmpB = ""
         for i in range(int(len(tmpPayloadbit)/8)):
             tmp = tmpPayloadbit[i*8:i*8+8]
@@ -447,7 +449,6 @@ class RxMac80211():
         if self.dbFlag:print("|----------------------------------------------------UDP HEADER----------------------------------------------------|")
         # print(self.udpBits)
         self.udpPayload = tmpB
-        # print("udp Payload:",tmpB)
 
     def Bi2Dec(self,inBi):
         tmpSum = 0

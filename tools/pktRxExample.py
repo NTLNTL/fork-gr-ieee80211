@@ -8,7 +8,8 @@ import cmath
 import struct
 import mac80211 as mac
 import txbits
-class dephy80211():
+import inspect
+class dephy80211siso():
     def __init__(self,addr, ifaddNoise = True, ifDebug = True):
 
 
@@ -83,7 +84,9 @@ class dephy80211():
                 self.__procRxChanUpdate()
                 self.__procRxSisoData()
         else:
+            print("in rxStepsList self.nSS = 2 ") # self.nSS != 1, return 
             pass # more than one ht-LTF or vht-LTF 
+                # or check VHT SIGA Bits 10-21, check table 21-12
 
         return self.rxDatabits
     
@@ -219,9 +222,7 @@ class dephy80211():
         print("channel updated")
 
     def __procRxSisoData(self):
-        if self.ifdb:print("DEBUG: final format:",self.phyFormat)
-        if self.ifdb:print("DEBUG: final mcs:",self.mcs) 
-        self.demod = p8h.modulation(self.phyFormat, self.mcs, bw=p8h.BW.BW20, nSTS=self.nSS, shortGi=False)
+
 
         if self.phyFormat ==  p8h.F.L or self.phyFormat ==  p8h.F.HT: 
             self.demod.procPktLenNonAggre(self.mdpuLen)
@@ -267,7 +268,7 @@ class dephy80211():
         if self.ifdb:print("DEBUG: self.rxDataQam len:",len(self.rxDataQam))
         # if self.ifdb:print("DEBUG: self.rxDataQam", self.rxDataQam)
         self.rxInterleaveBits = self.procSymQamToLlr()
-        print("compare interleave",compare([1 if np.real(each)>0 else 0  for each in self.rxInterleaveBits ],txbits.htMcs0interBits))
+        # print("compare interleave",compare([1 if np.real(each)>0 else 0  for each in self.rxInterleaveBits ],txbits.htMcs0interBits))
         # if self.ifdb:print("DEBUG: self.rxInterleaveBits len:",len(self.rxInterleaveBits))
         # if self.ifdb:print("DEBUG: self.rxInterleaveBits: \n", self.rxInterleaveBits)
 
@@ -282,6 +283,7 @@ class dephy80211():
         # if self.ifdb:print( "DEBUG: self.rxScrambleBits",self.rxScrambleBits)
 
         self.rxDatabits = self.PrcoDeScrambleBits()
+        print("data bits len",len(self.rxDatabits))
         print("data compare", compare(self.rxDatabits,txbits.vhtDataBitsMcs7))
 
 
@@ -308,13 +310,16 @@ class dephy80211():
         if self.phyFormat == p8h.F.VHT:
             if tmpDeScrambledBits[8:16] == self.calVhtSigBCrc:
                 print("vht SigB crc check pass")
-                tmpDeScrambledBits = tmpDeScrambledBits[16:]
+                tmpAmpduBits = tmpDeScrambledBits[16:16+8*self.mdpuLen]
+                C_VHT_EOF =  tmpDeScrambledBits[16+8*self.mdpuLen:16+8*self.mdpuLen+len(p8h.C_VHT_EOF * self.demod.nPadEof)]
+                print(len(C_VHT_EOF), print(C_VHT_EOF[0:len(p8h.C_VHT_EOF )]))
+                return tmpAmpduBits
             else:
                 print("ERROR: vht SigB crc check fail")
                 tmpDeScrambledBits = []
         else: 
             tmpDeScrambledBits = tmpDeScrambledBits[16:self.mdpuLen * 8 +16]#removing 16 serving bits and 6 tail bits  
-        return tmpDeScrambledBits
+            return tmpDeScrambledBits
         # legacy and ht: data bits + tail + padding -> scramble
         # vht: vht gets data bits scrambled first then add tail bits and then coded
     def procDeinterleave(self,interleavedBits,mod):
@@ -427,6 +432,7 @@ class dephy80211():
                     self.mdpuLen = self.bi2Deci(tmpHtSigBits[8:24])
                     self.phyFormat = p8h.F.HT 
                     self.mcs = self.bi2Deci(tmpHtSigBits[0:7])
+                    self.nSS = int(np.floor(self.mcs / 8)) + 1 #ht has 8-16 to identify 2 nSS, # vht?
 
                 if (self.htVhtCrc8Check(tmpVhtSigBits)):
                     if self.ifdb:print("DEBUG: VHT-SIGA  bits:",tmpHtSigBits)
@@ -434,6 +440,7 @@ class dephy80211():
                     self.pilotPIdx = 3
                     self.phyFormat = p8h.F.VHT
                     self.mcs = self.bi2Deci(tmpVhtSigBits[28:32])
+                    self.nSS = p8h.N_STS_VHTSU[self.bi2Deci(tmpVhtSigBits[10:13])]
 
                 if (not (self.htVhtCrc8Check(tmpHtSigBits) or self.htVhtCrc8Check(tmpVhtSigBits))):
                     print("state machin to L mcs 0 ")
@@ -443,12 +450,15 @@ class dephy80211():
                 self.phyFormat = p8h.F.L
                 self.pilotPIdx = 1 
                 
-            self.nSS = int(np.floor(self.mcs / 8)) + 1
+            print("self.nSS in pktformat",  self.nSS )
+            if self.ifdb:print("DEBUG: final format:",self.phyFormat)
+            if self.ifdb:print("DEBUG: final mcs:",self.mcs) 
+            self.demod = p8h.modulation(self.phyFormat, self.mcs, bw=p8h.BW.BW20, nSTS=self.nSS, shortGi=False)
 
         else:
             return "ERROR: legacy Sig parity check fail"
             
-    def procPilotTrack(self,inQam,IN_PILOT):
+    def procPilotTrack(self,inQam,IN_PILOT): #procResiCfoCompensate 
         tmpOut = None
         tmpPilotLocation = None
         tmpStandardPilot = [int (each * p8h.C_PILOT_PS[self.pilotPIdx]) for each in IN_PILOT ]
@@ -558,6 +568,27 @@ class dephy80211():
             if inArray[i] == 1:
                 tmpOut += 1<<i
         return tmpOut 
+
+
+class dephy80211sumimo():
+    def __init__(self,addr1,addr2):
+        self.nSS = self.getArgsNum()
+
+        sisoPhy1 = dephy80211siso(addr1,ifaddNoise = False ,ifDebug = True )
+        timeSig1 = sisoPhy1.rxStepsList()
+        sisoPhy2 = dephy80211siso(addr2,ifaddNoise = False ,ifDebug = True )
+        timeSig2 = sisoPhy2.rxStepsList()
+        print("here",sisoPhy1.demod.mcs)
+        #stop here self.nss = 2 channel estimation for 2 nLTF 
+
+
+
+    def getArgsNum(cls):
+        argspec = inspect.getfullargspec(cls.__init__)
+         # Subtract 1 to ignore 'self'
+        numArgs = len(argspec.args) - 1
+        return numArgs
+
 def myConstellationPlot(inSig):
         x = []
         y = [] 
@@ -634,12 +665,21 @@ if __name__ == "__main__":
 
 
     pyToolPath = os.path.dirname(__file__)
-    addr = os.path.join(pyToolPath, "../tmp/sig80211GenMultipleSiso_1x1_0.bin")
-    phy = dephy80211(addr,ifaddNoise = False ,ifDebug = True )
-    phyBits = phy.rxStepsList()
+    "siso rx "
+    # addr = os.path.join(pyToolPath, "../tmp/sig80211GenMultipleSiso_1x1_0.bin")
+    # phy = dephy80211siso(addr,ifaddNoise = False ,ifDebug = True )
+    # phyBits = phy.rxStepsList()
 
     # phyBiToBytePack = biArray2PackByte(phyBits) # to match org generated in TX 
+    # print("hex compare with mac pkt ->", phyBiToBytePack == b'\x01\x06\x9dN\x88\x01n\x00\xf4i\xd5\x80\x0f\xa0\x00\xc0\xca\xb1[\xe1\xf4i\xd5\x80\x0f\xa0\x00\xa9\x00\x00\xaa\xaa\x03\x00\x00\x00\x08\x00E\x00\x00:\xab\x02@\x00@\x11{\x96\n\n\x00\x06\n\n\x00\x01\x99\xd3"\xb9\x00&\x10\xec123456789012345678901234567890)\xa9\xa1y')
 
+
+    "mimo rx"
+    addr1 = os.path.join(pyToolPath,"../tmp/sig80211GenMultipleMimo_2x2_0.bin")
+    addr2 = os.path.join(pyToolPath,"../tmp/sig80211GenMultipleMimo_2x2_1.bin")
+    phymimo = dephy80211sumimo(addr1,addr2)
+
+    
 
     # MAC       
     # phyBits = [1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 1, 0, 0, 0, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 1, 1, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 0, 1, 0, 0, 1, 1, 1, 0, 0, 0, 1, 1, 0, 1, 1, 1, 0, 1, 1, 0, 1, 0, 1, 0, 0, 0, 0, 1, 1, 1, 0, 0, 1, 0, 1, 1, 1, 1, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 0, 0, 0, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 1, 1, 1, 1, 0, 0, 1, 0, 1, 1, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 1, 1, 0, 0, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 0, 1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 1, 1, 0, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 0, 0, 0, 0, 1, 0, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 0, 1, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 1, 0, 1, 0, 1, 1, 1, 1, 0, 0, 1, 1, 1, 0, 0, 0, 1, 1, 1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 0, 1, 1, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 1, 0, 0, 0, 1, 1, 1, 0, 1, 1, 1, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 0, 1, 1, 1, 0, 0, 0, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 1, 0, 1, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 0, 1, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 1, 1, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 1, 1, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 1, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0, 1, 1, 0, 1, 0, 0, 0, 1, 0, 0, 1, 1, 0, 1, 1, 1, 0, 1, 0, 0, 1, 1, 1, 0, 1, 1, 0, 0, 0, 0, 1, 0, 1, 1, 0, 1, 1, 1, 1, 1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 1, 0, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0, 1, 1, 1, 1, 0, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1, 0, 1, 1, 1, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 1, 0, 0, 0, 1, 1, 1, 0, 1, 1, 1, 0, 0, 1, 0, 1, 1, 1, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 1, 0, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 0, 0, 1, 1, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 1, 1, 0, 1, 0, 1, 0, 1, 1, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 1, 1, 0, 1, 1, 1, 0, 0, 0, 1, 1, 0, 1, 1, 0, 0, 0, 1, 1, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 1, 1, 0, 1, 1, 0, 0, 0, 1, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 1, 0, 1, 1, 0, 1, 1, 0, 1, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 1, 1, 0, 0, 1, 0, 0, 0, 1, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 1, 1, 1, 0, 1, 0, 1, 0, 0, 0, 0, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 1, 1, 0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 0, 1, 1, 0, 1, 1, 1, 0, 0, 1, 0, 1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0, 1, 1, 0, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 1, 1, 1, 0, 1, 1, 0, 0, 0, 0, 1, 0, 1, 0, 1, 1, 0, 1, 1, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 1, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0, 0, 0, 1, 0, 0, 1, 1, 0, 1, 1, 1, 1, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1, 1, 0, 1, 1, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 1, 1, 0, 0, 1, 0, 0, 1, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 1, 0, 1, 0, 1, 0, 0, 1, 1, 1, 0, 0, 0, 1, 1, 0, 1, 0, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 1, 1, 0, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 0, 1, 0, 1, 1, 1, 1, 0, 0, 1, 0, 1, 1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1, 0, 1, 1, 0, 0, 0, 1, 1, 1, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 0, 1, 1, 1, 0, 1, 0, 1, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 1, 0, 0, 1, 1, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0, 1, 1, 1, 1, 0, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 1, 0, 0, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 0, 1, 0, 1, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 1, 0, 1, 1, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 1, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 0, 0, 0, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 0, 1, 0, 0, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0, 0, 1, 1, 1, 0, 1, 0, 1, 1, 0, 0, 1, 1, 1, 1]

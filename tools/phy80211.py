@@ -78,6 +78,7 @@ class phy80211():
         self.ifdb = ifDebug
 
     def genFromMpdu(self, mpdu, mod):
+        print("running genFromMpdu")
         if(isinstance(mpdu, (bytes, bytearray)) and isinstance(mod, p8h.modulation) and len(mpdu) > 0 and mod.initRes):
             if(mod.phyFormat == p8h.F.L):
                 self.mpdu = mpdu
@@ -107,6 +108,7 @@ class phy80211():
                 self.__genInterleaveDataBits()
                 self.__genConstellation()
                 self.__genOfdmSignal()
+                print("in ht here", self.m.nSym)
             else:
                 print("cloud phy80211, genFromMpdu input format error, %s is not supported" % mod.phyFormat)
                 return
@@ -675,12 +677,17 @@ class phy80211():
             for each in self.ampdu:
                 for i in range(0,8):
                     tmpAmpduBits.append((each>>i) & (1))
+            print('tmpAmpduBits',len(tmpAmpduBits))
             # service bits, 7 scrambler init, 1 reserved, sig b crc
             tmpServiceBits = [0] * 8 + self.vhtSigBCrcBits
-            if self.ifdb: print("vht service bits: ", tmpServiceBits)
+            if self.ifdb: print("vht service bits: ", tmpServiceBits, len(tmpServiceBits))
             # to do the eof padding
             tmpPsduBits = tmpAmpduBits + p8h.C_VHT_EOF * self.m.nPadEof + [0] * 8 * self.m.nPadOctet
+
             self.dataBits = tmpServiceBits + tmpPsduBits + [0] * self.m.nPadBits
+            print("p8h.C_VHT_EOF",p8h.C_VHT_EOF,len(p8h.C_VHT_EOF),self.m.nPadEof,len(p8h.C_VHT_EOF * self.m.nPadEof),self.m.nPadBits,self.m.nPadOctet)
+            #[1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 1, 0, 0, 1, 0]
+            
         else:
             """
             - legacy and ht, just service, psdu is mpdu, tail bits nES*6 and padded bits 
@@ -700,7 +707,6 @@ class phy80211():
                     for i in range(0,8):
                         tmpMpduBits.append((each>>i) & (1))
                 tmpPsduBits = tmpMpduBits
-                print("self.mpdu len",len(self.mpdu))
             # service bits
             tmpServiceBits = [0] * 16
             self.dataBits = tmpServiceBits + tmpPsduBits + [0] * 6 * self.m.nES + [0] * self.m.nPadBits

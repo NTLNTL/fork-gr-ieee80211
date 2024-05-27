@@ -249,6 +249,7 @@ class modulation:
 
         elif (self.phyFormat == F.HT):
             self.nSS = int(np.floor(self.mcs / 8)) + 1
+            print("self.nSS, self.nSTS ",self.nSS ,self.nSTS)
             if (self.mcs < 0 or self.mcs > 31 or self.nSS != self.nSTS or self.nSS < 1 or self.nSS > 4 or (
             not self.bw in [BW.BW20, BW.BW40])):
                 self.initRes = False
@@ -770,6 +771,7 @@ C_SV_STATE_OUTPUT = [
     [1, 2], [2, 1], [3, 0], [0, 3], [1, 2], [2, 1], [3, 0], [0, 3],
 ]
 
+N_STS_VHTSU = [1,2,3,4,5,6,7,8]
 def procBcc(inBits, cr):
     if(isinstance(inBits, list) or isinstance(cr, CR)):
         # binary convolutional coding, ieee 802.11 2016 ofdm sec 17.3.5.6
