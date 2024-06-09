@@ -472,8 +472,6 @@ class phy80211():
                 p8h.procGi(p8h.procToneScaling(p8h.procFftMod(p8h.procLegacyCSD(tmpSig1Qam, self.m.nSS, ssItr, self.m.spr)),p8h.C_SCALENTF_SIG_VHT_A[self.m.bw.value], self.m.nSS)),
                 p8h.procGi(p8h.procToneScaling(p8h.procFftMod(p8h.procLegacyCSD(tmpSig2Qam, self.m.nSS, ssItr, self.m.spr)),p8h.C_SCALENTF_SIG_VHT_A[self.m.bw.value], self.m.nSS))))
 
-    
-
     def __genNonLegacyTraining(self):
         tmpSsNonLegacyTraining = []
         for i in range(0, self.m.nSS):
@@ -484,7 +482,7 @@ class phy80211():
         for ssItr in range(0, self.m.nSS):
             tmpStf.append(p8h.procCSD(p8h.procNonDataSC(p8h.C_STF_VHT[self.m.bw.value]), self.m.nSS, ssItr, self.m.spr))
 
-
+            #shouldn't CSD need to be applied in time domain?
 
         if(self.m.phyFormat == p8h.F.VHT and self.m.mu):
             tmpStf = p8h.procSpatialMapping(tmpStf, self.bfQ)
@@ -535,6 +533,7 @@ class phy80211():
             if self.ifdb: print("non legacy training ss %d, sample len %d" % (ssIter, len(tmpSsNonLegacyTraining[ssIter])))
             # if self.ifdb: print(tmpSsNonLegacyTraining[ssIter])
         print("__genNonLegacyTraining",len(tmpSsNonLegacyTraining),len(tmpSsNonLegacyTraining[0]))
+    
     def __genVhtSignalB(self):
         self.ssVhtSigB = []
         tmpVhtSigBBits = []

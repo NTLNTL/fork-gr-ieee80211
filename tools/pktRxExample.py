@@ -66,7 +66,7 @@ class dephy80211siso():
         # debug
         self.ifdb = ifDebug
 
-    def rxStepsList(self): 
+    def rxSisoStepsList(self): 
         # self.__testNoCfo()
         self.__procRxLegacyStfTrigger()
         self.__procRxLegacyCfoEst()
@@ -84,7 +84,7 @@ class dephy80211siso():
                 self.__procRxChanUpdate()
                 self.__procRxSisoData()
         else:
-            print("in rxStepsList self.nSS  ",self.nSS) 
+            print("in rxSisoStepsList self.nSS  ",self.nSS) 
             print("__procRxPassSymToMimoRx len",len(self.__procRxPassSymToMimoRx()) ) #should all go through cfo, symbols start from VHT-STF,BHT-KTF has new channel estimation
             return self.__procRxPassSymToMimoRx()
 
@@ -601,15 +601,37 @@ class dephy80211sumimo():
     def __init__(self,addr1,addr2,addr3="",addr4=""):
         self.addresses = [addr1,addr2,addr3,addr4] 
         self.stream = [] 
+        self.d = []
+        
         for addr in self.addresses:
             if addr:  
                 tmpSisoPhy = dephy80211siso(addr,ifaddNoise = False ,ifDebug = True )
-                self.stream.append(tmpSisoPhy.rxStepsList()) #need to append two stream first? stop here
-          
-        print(len(self.stream))
+                self.d.append(tmpSisoPhy)#object for each stream, demod is created from siso
+                self.stream.append(tmpSisoPhy.rxSisoStepsList()) 
+        self.nSymIdx = 0
+        self.nSS = len(self.stream)
+        self.nLtf = self.nSS
+
+        #channel 
+        self.NLchan = []
 
 
 
+
+    def rxMimoStepsList(self):
+        print("in rxMimoStepsList",self.d[0].demod.nSym)
+        self.__rxMimoNLchanEstimate()
+
+
+    def __rxMimoNLchanEstimate(self):
+        self.nSymIdx = 1 #skip HT-STF 
+        tmpSSholder = [] #len = nSS, each SS has nSS number of LTF
+        for ssItr in range(0, self.nSS):
+            tmpStream = []
+            for ltfIter in range(0, self.nLtf):
+                tmpStream += list(np.fft.fft(self.stream[ssItr][(self.nSymIdx+ltfIter)*64:(self.nSymIdx+ltfIter)*64+64]))
+                print(tmpStream)
+            tmpSSholder.append(tmpStream)
 
 def myConstellationPlot(inSig):
         x = []
@@ -690,7 +712,7 @@ if __name__ == "__main__":
     "siso rx "
     # addr = os.path.join(pyToolPath, "../tmp/sig80211GenMultipleSiso_1x1_0.bin")
     # phy = dephy80211siso(addr,ifaddNoise = False ,ifDebug = True )
-    # phyBits = phy.rxStepsList()
+    # phyBits = phy.rxSisoStepsList()
 
     # phyBiToBytePack = biArray2PackByte(phyBits) # to match org generated in TX 
     # print("hex compare with mac pkt ->", phyBiToBytePack == b'\x01\x06\x9dN\x88\x01n\x00\xf4i\xd5\x80\x0f\xa0\x00\xc0\xca\xb1[\xe1\xf4i\xd5\x80\x0f\xa0\x00\xa9\x00\x00\xaa\xaa\x03\x00\x00\x00\x08\x00E\x00\x00:\xab\x02@\x00@\x11{\x96\n\n\x00\x06\n\n\x00\x01\x99\xd3"\xb9\x00&\x10\xec123456789012345678901234567890)\xa9\xa1y')
@@ -700,6 +722,7 @@ if __name__ == "__main__":
     addr1 = os.path.join(pyToolPath,"../tmp/sig80211GenMultipleMimo_2x2_0.bin")
     addr2 = os.path.join(pyToolPath,"../tmp/sig80211GenMultipleMimo_2x2_1.bin")
     phymimo = dephy80211sumimo(addr1,addr2)
+    phymimo.rxMimoStepsList()
 
     
 
