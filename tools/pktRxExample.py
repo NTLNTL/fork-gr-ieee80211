@@ -84,9 +84,9 @@ class dephy80211siso():
                 self.__procRxChanUpdate()
                 self.__procRxSisoData()
         else:
-            print("in rxStepsList self.nSS = 2 ") # self.nSS != 1, return 
-            pass # more than one ht-LTF or vht-LTF 
-                # or check VHT SIGA Bits 10-21, check table 21-12
+            print("in rxStepsList self.nSS  ",self.nSS) 
+            print("__procRxPassSymToMimoRx len",len(self.__procRxPassSymToMimoRx()) ) #should all go through cfo, symbols start from VHT-STF,BHT-KTF has new channel estimation
+            return self.__procRxPassSymToMimoRx()
 
         return self.rxDatabits
     
@@ -224,12 +224,7 @@ class dephy80211siso():
     def __procRxSisoData(self):
 
 
-        if self.phyFormat ==  p8h.F.L or self.phyFormat ==  p8h.F.HT: 
-            self.demod.procPktLenNonAggre(self.mdpuLen)
-        else:
-            self.demod.procPktLenAggre(self.mdpuLen)
-            print("in__procRxSisoData VHT", p8h.F.VHT ,self.mdpuLen,self.demod.nSym )
-                # self.nSymProcIdx start of data symbol 
+
         if self.phyFormat == p8h.F.L:
             self.nSymProcIdx = 5
         elif  self.phyFormat == p8h.F.HT:
@@ -290,6 +285,31 @@ class dephy80211siso():
 
         if self.ifdb:print("DEBUG: self.rxDatabits len:", len(self.rxDatabits),self.rxDatabits[0:16]   )
         # if self.ifdb:print("DEBUG: self.rxDatabits \n", self.rxDatabits )
+    def __procRxPassSymToMimoRx(self): # return HT-STF, HT-LTF(s),Data(s) and  apply cfo 
+        self.nSymProcIdx = 7
+        tmpnSym = 1 + self.nSS + self.demod.nSym  #HT-STF+HT-LTF(s)+Data(s)
+        tmpRxMimoSym = self.timeInSig[self.legacyStfIndex+(self.nSymProcIdx*80):self.legacyStfIndex+(self.nSymProcIdx*80)+tmpnSym*80]
+        # myPlot(tmpRxMimoSym)
+        print("in__procRxPassSymToMimoRx",self.demod.nSym,tmpnSym,self.nSS)
+
+        tmpOut = []
+        for nSymIter in range(tmpnSym):
+            # compensate cfo 
+            tmpSym =tmpRxMimoSym[nSymIter*80:nSymIter*80+80]
+            tmp = []
+            for nSampleIter in range(80):
+                tmp.append(tmpSym[nSampleIter]*complex(np.cos(((nSymIter*80)+nSampleIter)*self.cfoRad), np.sin(((nSymIter*80)+nSampleIter)*self.cfoRad)))
+                # remove CP 
+            tmpSymTime = tmp[16:80]
+            tmpOut+=tmpSymTime
+        return tmpOut
+
+                
+
+
+
+        
+        pass
     def PrcoDeScrambleBits(self):
         tmpScrambler = 0
         tmpDeScrambledBits = []
@@ -412,8 +432,8 @@ class dephy80211siso():
         return tmpDeMapping
     
     def __procRxPktFormat(self):
-        tmpSig1 = self.timeInSig[self.legacyStfIndex+400:self.legacyStfIndex+400+80]
-        tmpSig2 = self.timeInSig[self.legacyStfIndex+480:self.legacyStfIndex+480+80]
+        tmpSig1 = self.timeInSig[self.legacyStfIndex+5*80:self.legacyStfIndex+5*80+80]
+        tmpSig2 = self.timeInSig[self.legacyStfIndex+6*80:self.legacyStfIndex+6*80+80]
         if(sum(self.LSigBits[0:17])%2 == self.LSigBits[17] ): #parity check for Sig field
             print("pass parity check")
             if self.mcs == 0:
@@ -454,6 +474,13 @@ class dephy80211siso():
             if self.ifdb:print("DEBUG: final format:",self.phyFormat)
             if self.ifdb:print("DEBUG: final mcs:",self.mcs) 
             self.demod = p8h.modulation(self.phyFormat, self.mcs, bw=p8h.BW.BW20, nSTS=self.nSS, shortGi=False)
+
+            if self.phyFormat ==  p8h.F.L or self.phyFormat ==  p8h.F.HT: 
+                self.demod.procPktLenNonAggre(self.mdpuLen)
+            else:
+                self.demod.procPktLenAggre(self.mdpuLen)
+                print("__procRxPktFormat VHT", p8h.F.VHT ,self.mdpuLen,self.demod.nSym )
+                # self.nSymProcIdx start of data symbol 
 
         else:
             return "ERROR: legacy Sig parity check fail"
@@ -571,23 +598,18 @@ class dephy80211siso():
 
 
 class dephy80211sumimo():
-    def __init__(self,addr1,addr2):
-        self.nSS = self.getArgsNum()
+    def __init__(self,addr1,addr2,addr3="",addr4=""):
+        self.addresses = [addr1,addr2,addr3,addr4] 
+        self.stream = [] 
+        for addr in self.addresses:
+            if addr:  
+                tmpSisoPhy = dephy80211siso(addr,ifaddNoise = False ,ifDebug = True )
+                self.stream.append(tmpSisoPhy.rxStepsList()) #need to append two stream first? stop here
+          
+        print(len(self.stream))
 
-        sisoPhy1 = dephy80211siso(addr1,ifaddNoise = False ,ifDebug = True )
-        timeSig1 = sisoPhy1.rxStepsList()
-        sisoPhy2 = dephy80211siso(addr2,ifaddNoise = False ,ifDebug = True )
-        timeSig2 = sisoPhy2.rxStepsList()
-        print("here",sisoPhy1.demod.mcs)
-        #stop here self.nss = 2 channel estimation for 2 nLTF 
 
 
-
-    def getArgsNum(cls):
-        argspec = inspect.getfullargspec(cls.__init__)
-         # Subtract 1 to ignore 'self'
-        numArgs = len(argspec.args) - 1
-        return numArgs
 
 def myConstellationPlot(inSig):
         x = []
