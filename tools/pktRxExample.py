@@ -180,7 +180,7 @@ class dephy80211siso():
 
     def __procRxLegacyChanEst(self):# 64 samples channel info 
                                     #channel before ifft compensate, 
-                                    # after channel compensate, processing symbol
+                                    # after channel compensate, process symbol
         tmpChan = []
         tmpLtfOri = p8h.procNonDataSC(p8h.C_LTF_L[p8h.BW.BW20.value])
         #flip by half 
@@ -289,7 +289,6 @@ class dephy80211siso():
         self.nSymProcIdx = 7
         tmpnSym = 1 + self.nSS + self.demod.nSym  #HT-STF+HT-LTF(s)+Data(s)
         tmpRxMimoSym = self.timeInSig[self.legacyStfIndex+(self.nSymProcIdx*80):self.legacyStfIndex+(self.nSymProcIdx*80)+tmpnSym*80]
-        # myPlot(tmpRxMimoSym)
         print("in__procRxPassSymToMimoRx",self.demod.nSym,tmpnSym,self.nSS)
 
         tmpOut = []
@@ -605,12 +604,13 @@ class dephy80211sumimo():
         
         for addr in self.addresses:
             if addr:  
-                tmpSisoPhy = dephy80211siso(addr,ifaddNoise = False ,ifDebug = True )
+                tmpSisoPhy = dephy80211siso(addr,ifaddNoise = True ,ifDebug = True )
                 self.d.append(tmpSisoPhy)#object for each stream, demod is created from siso
                 self.stream.append(tmpSisoPhy.rxSisoStepsList()) 
         self.nSymIdx = 0
         self.nSS = len(self.stream)
         self.nLtf = self.nSS
+        self.nSts =  self.nSS #shouldn't be the same. 
 
         #channel 
         self.NLchan = []
@@ -625,14 +625,42 @@ class dephy80211sumimo():
 
     def __rxMimoNLchanEstimate(self):
         self.nSymIdx = 1 #skip HT-STF 
-        tmpSSholder = [] #len = nSS, each SS has nSS number of LTF
-        for ssItr in range(0, self.nSS):
-            tmpStream = []
-            for ltfIter in range(0, self.nLtf):
-                tmpStream += list(np.fft.fft(self.stream[ssItr][(self.nSymIdx+ltfIter)*64:(self.nSymIdx+ltfIter)*64+64]))
-                print(tmpStream)
-            tmpSSholder.append(tmpStream)
+        tmpChanSyms = [] 
+        hTLtfTxP = []
+        htChanInv = []
+        for ssItr in range(0, self.nSS): #nLTF = tx number   #tmpChanSyms has nSTS(rx antenna) number    
+            rxltfSym = [] #from received streams
+            tmpLtfP = [] 
+            rxltfSc = []
+            
+            for ltfIter in range(0, self.nLtf):#[56*2,56*2]
+                tmpLtfP.append(p8h.C_P_LTF_HT_4[ssItr][ltfIter])
+                rxltfSym += list(p8h.procFftDemod(self.stream[ssItr][(self.nSymIdx+ltfIter)*64:(self.nSymIdx+ltfIter)*64+64]))
+                print(len(rxltfSym))
 
+            hTLtfTxP.append(tmpLtfP)
+            tmpChanSyms.append(rxltfSym)
+        for scIter in range(64): #to make tmpStsByLtf has 64 2by2 rxSym
+            tmpStsByLtf = []
+            for ssItr in range(0, self.nSS):
+                tmpLtf = [] 
+                for ltfIter in range(0, self.nLtf):
+                    tmpLtf.append(self.stream[ssItr][64*ltfIter+scIter])
+                tmpStsByLtf.append(tmpLtf)
+            rxltfSc.append(np.array(tmpStsByLtf))
+
+            tmpChan = np.matmul(tmpStsByLtf,np.linalg.inv(hTLtfTxP))
+            htChanInv.append(np.linalg.inv(tmpChan))
+        
+            # print(np.matmul(htChanInv,rxltfSc))#to recover TX 
+
+
+# p8h.C_SCALENTF_LTF_VHT[self.m.bw.value]
+
+
+        myConstellationPlot(tmpChanSyms[0][0:56])
+        myConstellationPlot(tmpChanSyms[1][0:56])
+        myConstellationPlot(tmpChanSyms[1][0+56:56+56])
 def myConstellationPlot(inSig):
         x = []
         y = [] 

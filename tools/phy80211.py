@@ -749,6 +749,10 @@ class phy80211():
             this works for HT and VHT usual conditions
             for vht 20/40/80 4x4, nBlock * nES * S is smaller than nCBPSS
         """
+        debugCoded = []
+        for i in range(self.m.nES):
+            debugCoded.append([0]*self.m.nCBPS*self.m.nSym )
+            
         self.ssStreamBits = []
         if(self.m.phyFormat == p8h.F.L):
             self.ssStreamBits = self.esCodedBits
@@ -757,12 +761,19 @@ class phy80211():
                 self.ssStreamBits.append([0] * self.m.nSym * self.m.nCBPSS)
             s = int(max(1, self.m.nBPSCS/2))
             cs = self.m.nSS * s     # cs is the capital S used in standard
+            print("self.m.nBPSCS",self.m.nBPSCS,self.m.nCBPSS,self.m.nCBPS,self.m.nSym,len(debugCoded),len(debugCoded[0]))
+            # self.m.nSym = 2
             for isym in range(0, self.m.nSym): # select one symbol  ->  #each symbol distribute into 
                 for iss in range(0, self.m.nSS): # two ss take turn; SS[0] first; SS[1] next 
                     for k in range(0, int(self.m.nCBPSS)): #each SS has nCBPSS btis !!nCBPSS =nCBPS/2
+                        
                         j = int(np.floor(k/s)) % self.m.nES
                         i = (iss) * s + cs * int(np.floor(k/(self.m.nES * s))) + int(k % s)
                         self.ssStreamBits[iss][k + int(isym * self.m.nCBPSS)] = self.esCodedBits[j][i + int(isym * self.m.nCBPS)]
+                        #reassemble 
+                        debugCoded[j][isym*self.m.nCBPS + i] = self.ssStreamBits[iss][k + int(isym * self.m.nCBPSS)]
+        
+        print("result", debugCoded[0]==self.esCodedBits[0])
         for each in self.ssStreamBits:
             if self.ifdb: print("stream parser bits:", len(each))
             if self.ifdb: print(each)

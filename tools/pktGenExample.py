@@ -216,7 +216,7 @@ if __name__ == "__main__":
     # """multiple packets of different formats concatenate MIMO """
     ssMultiList = []
     pkt = genMac80211UdpMPDU(udpPayload)
-    for mcsIter in range(9,10): #8,16
+    for mcsIter in range(15,16): #8,16
         phy80211Ins.genFromMpdu(pkt, p8h.modulation(phyFormat=p8h.F.HT, mcs=mcsIter, bw=p8h.BW.BW20, nSTS=2, shortGi=False))
         ssFinal = phy80211Ins.genFinalSig(multiplier = 12.0 * np.sqrt(2), cfoHz = 0, num = 1, gap = True, gapLen = 1200)
         ssMultiList.append(ssFinal)
