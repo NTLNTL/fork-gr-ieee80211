@@ -15,6 +15,7 @@ class dephy80211siso():
 
         #rx trigger 
         self.timeInSig = p8h.procLoadComplexBin(addr)
+        
         self.threshold = 0.8
         self.searchWin = 50
         self.autoOut = []
@@ -85,9 +86,9 @@ class dephy80211siso():
                 self.__procRxSisoData()
         else:
             print("in rxSisoStepsList self.nSS  ",self.nSS) 
-            print("__procRxPassSymToMimoRx len",len(self.__procRxPassSymToMimoRx()) ) #should all go through cfo, symbols start from VHT-STF,BHT-KTF has new channel estimation
-            return self.__procRxPassSymToMimoRx()
-
+            print("__procRxPassSymToMimoRx len",len(self.__procRxPassSymToMimoRx()) ) #should all go through cfo, symbols start from VHT-STF,VHT-LTF has new channel estimation
+            return self.__procRxPassSymToMimoRx() #return time domain 64 samples for each symbols
+ 
         return self.rxDatabits
     
 
@@ -250,8 +251,10 @@ class dephy80211siso():
             tmpSigFreq = self.procCompChan(tmpSigFreq) #64
             tmpSigFreq = p8h.procRmDcNonDataSc(tmpSigFreq, self.demod.phyFormat)
             tmpSigFreq = self.procPilotTrack(tmpSigFreq,tmpPilot)
+            myConstellationPlot(tmpSigFreq)
             print("len procPilotTrack", len(tmpSigFreq))
             self.rxDataQam += p8h.procRemovePilots(tmpSigFreq) 
+            # myConstellationPlot(p8h.procRemovePilots(tmpSigFreq) )
             print("len  self.rxDataQam", len(self.rxDataQam))
             self.nSymProcIdx +=1 
             if(not(self.phyFormat == p8h.F.L)):
@@ -279,7 +282,7 @@ class dephy80211siso():
 
         self.rxDatabits = self.PrcoDeScrambleBits()
         print("data bits len",len(self.rxDatabits))
-        print("data compare", compare(self.rxDatabits,txbits.vhtDataBitsMcs7))
+        # print("data compare", compare(self.rxDatabits,txbits.vhtDataBitsMcs7))
 
 
 
@@ -308,7 +311,7 @@ class dephy80211siso():
 
 
         
-        pass
+   
     def PrcoDeScrambleBits(self):
         tmpScrambler = 0
         tmpDeScrambledBits = []
@@ -488,6 +491,7 @@ class dephy80211siso():
         tmpOut = None
         tmpPilotLocation = None
         tmpStandardPilot = [int (each * p8h.C_PILOT_PS[self.pilotPIdx]) for each in IN_PILOT ]
+        print("IN_PILOT",p8h.C_PILOT_PS[self.pilotPIdx],tmpStandardPilot)
         # print("pilot number in procPilotTrack", self.pilotPIdx, p8h.C_PILOT_PS[self.pilotPIdx],tmpStandardPilot)
         if len(inQam) == 52: 
             tmpPilotLocation= [5,19,32,46]
@@ -557,7 +561,7 @@ class dephy80211siso():
         tmpInSym = self.timeInSig[self.legacyStfIndex+320:self.legacyStfIndex+320+80] 
         
         self.LSigBits =  p8h.procViterbiDecoder(self.proRxSigSym(tmpInSym,p8h.M.BPSK),24, p8h.CR.CR12)
-
+        print( self.LSigBits)
 
 
         tmpRecvHeaderBits = self.LSigBits[0:17]
@@ -575,7 +579,7 @@ class dephy80211siso():
             print("ERROR: legacy sig Parity Bits error")
             self.mcs = None
             return
-
+        
        
 
     def procCompChan(self,fftSymIn):#in 64 samples
@@ -611,22 +615,91 @@ class dephy80211sumimo():
         self.nSS = len(self.stream)
         self.nLtf = self.nSS
         self.nSts =  self.nSS #shouldn't be the same. 
+        self.mimonSym = self.d[0].demod.nSym #asuuming symbol number is equal in each stream 
 
         #channel 
-        self.NLchan = []
+        self.NLchanInv = []
 
+        #data
+        self.ssSymChanComp = [[] for i in range(self.nSS)]
+        self.ssDataQam = [[] for i in range(self.nSS)]
 
 
 
     def rxMimoStepsList(self):
         print("in rxMimoStepsList",self.d[0].demod.nSym)
         self.__rxMimoNLchanEstimate()
+        self.__rxMimoNLchanComp()
+        self.__rxMimoProcData()
+    def __rxMimoProcData(self):
+          
+        # tmpSigFreq = p8h.procFftDemod(tmpSymTime)
+        # tmpSigFreq = self.procCompChan(tmpSigFreq) #64
 
 
+        # tmpSigFreq = p8h.procRmDcNonDataSc(tmpSigFreq, self.demod.phyFormat)
+        # tmpSigFreq = self.procPilotTrack(tmpSigFreq,tmpPilot)
+        # print("len procPilotTrack", len(tmpSigFreq))
+        # self.rxDataQam += p8h.procRemovePilots(tmpSigFreq) 
+        # print("len  self.rxDataQam", len(self.rxDataQam))
+        # self.nSymProcIdx +=1 
+        # if(not(self.phyFormat == p8h.F.L)):
+        #     tmpPilot = tmpPilot[1:] + [tmpPilot[0]] #?
+        # # myConstellationPlot( self.rxDataQam)
+        tmpPilot = []
+        tmpPilotPIdx = 3 #data symbol pilot index starting at 3
+        print("self.d[ssIter].demod",self.d[0].pilotPIdx)
+
+        for ssIter in range(1):#self.nSS
+            tmpPilot.append (p8h.C_PILOT_HT[p8h.BW.BW20.value][self.nSS - 1][ssIter])
+
+            self.d[ssIter].pilotPIdx = 3 
+            for symIter in range(1):#self.mimonSym
+                tmpSym =  self.ssSymChanComp[ssIter][symIter*64:(symIter+1)*64]
+                print("len",len(tmpSym))
+                tmpSym = p8h.procRmDcNonDataSc(tmpSym, self.d[ssIter].demod.phyFormat)
+                print("len",len(tmpSym))
+                myConstellationPlot(tmpSym)
+                tmpSym = self.d[ssIter].procPilotTrack(tmpSym,tmpPilot[ssIter])
+                myConstellationPlot(tmpSym)
+                if(not(self.d[ssIter].demod.phyFormat == p8h.F.L)):
+                    tmpPilot[ssIter] = tmpPilot[ssIter][1:] + [tmpPilot[ssIter][0]] 
+
+            print("----")
+    def __rxMimoNLchanComp(self):
+      
+        # dataSym = self.d[0].demod.nSym
+        for symIter in range(1):#self.mimonSym
+            
+
+            tmpSS= [] #one symbol
+            #fft first
+            for ssItr in range(0, self.nSS): #len of tmpSS = nSS, taking first symbol
+                tmp = self.stream[ssItr][(symIter+self.nSymIdx)*64:(symIter+1+self.nSymIdx)*64]
+                tmpFreq = p8h.procFftDemod(tmp)
+                myConstellationPlot(tmpFreq)
+                tmpSS.append(tmpFreq)
+            tmp64sc = [] #([[ss1d1],[ss2d1]], [[ss1d2],[ss2d2]])
+                    # print(np.matmul(rxltfSc,htChanInv))#to recover TX 
+
+            for scIter in range(64):
+                tmp1sc = []
+                for ssItr in range(0, self.nSS):
+                    tmp1sc.append([tmpSS[ssItr][scIter]])
+                tmp64sc.append(tmp1sc)
+            
+                tmp1compOut = np.matmul(self.NLchanInv[scIter], tmp1sc )
+                    # print(np.matmul(rxltfSc,htChanInv))#to recover TX 
+
+                #sidtribute comp out to stream 
+                for ssItr in range(0, self.nSS):
+                     self.ssSymChanComp[ssItr].append(tmp1compOut[ssItr])
+   
+            print("  self.ssSymChanComp",len(  self.ssSymChanComp),len(  self.ssSymChanComp[0]),  self.ssSymChanComp)
     def __rxMimoNLchanEstimate(self):
         self.nSymIdx = 1 #skip HT-STF 
         tmpChanSyms = [] 
-        hTLtfTxP = []
+        htLtfTxP = []
         htChanInv = []
         for ssItr in range(0, self.nSS): #nLTF = tx number   #tmpChanSyms has nSTS(rx antenna) number    
             rxltfSym = [] #from received streams
@@ -638,7 +711,7 @@ class dephy80211sumimo():
                 rxltfSym += list(p8h.procFftDemod(self.stream[ssItr][(self.nSymIdx+ltfIter)*64:(self.nSymIdx+ltfIter)*64+64]))
                 print(len(rxltfSym))
 
-            hTLtfTxP.append(tmpLtfP)
+            htLtfTxP.append(tmpLtfP)
             tmpChanSyms.append(rxltfSym)
         for scIter in range(64): #to make tmpStsByLtf has 64 2by2 rxSym
             tmpStsByLtf = []
@@ -649,18 +722,22 @@ class dephy80211sumimo():
                 tmpStsByLtf.append(tmpLtf)
             rxltfSc.append(np.array(tmpStsByLtf))
 
-            tmpChan = np.matmul(tmpStsByLtf,np.linalg.inv(hTLtfTxP))
+            tmpChan = np.matmul(np.linalg.inv(htLtfTxP),tmpStsByLtf)
             htChanInv.append(np.linalg.inv(tmpChan))
-        
-            # print(np.matmul(htChanInv,rxltfSc))#to recover TX 
+        self.NLchanInv  = htChanInv
+        # print(np.matmul(rxltfSc,htChanInv))#to recover TX 
+
+        self.nSymIdx+=self.nLtf # for ht, after ht-LTF is data symbol
+
+
 
 
 # p8h.C_SCALENTF_LTF_VHT[self.m.bw.value]
 
 
-        myConstellationPlot(tmpChanSyms[0][0:56])
-        myConstellationPlot(tmpChanSyms[1][0:56])
-        myConstellationPlot(tmpChanSyms[1][0+56:56+56])
+        # myConstellationPlot(tmpChanSyms[0][0:56])
+        # myConstellationPlot(tmpChanSyms[1][0:56])
+        # myConstellationPlot(tmpChanSyms[1][0+56:56+56])
 def myConstellationPlot(inSig):
         x = []
         y = [] 
@@ -673,8 +750,8 @@ def myConstellationPlot(inSig):
         plt.title("ConstellationPlot in self")
         # plt.xlim([-1.1, 1.1])
         # plt.ylim([-1.1, 1.1])
-        plt.xlim([-2, 2])
-        plt.ylim([-2, 2])
+        # plt.xlim([-2, 2])
+        # plt.ylim([-2, 2])
         plt.scatter(x,y)
         plt.show()
 
@@ -739,23 +816,24 @@ if __name__ == "__main__":
     pyToolPath = os.path.dirname(__file__)
     "siso rx "
     # addr = os.path.join(pyToolPath, "../tmp/sig80211GenMultipleSiso_1x1_0.bin")
+    # # addr = os.path.join(pyToolPath, "../tmp/recordchop.bin")
     # phy = dephy80211siso(addr,ifaddNoise = False ,ifDebug = True )
     # phyBits = phy.rxSisoStepsList()
 
     # phyBiToBytePack = biArray2PackByte(phyBits) # to match org generated in TX 
-    # print("hex compare with mac pkt ->", phyBiToBytePack == b'\x01\x06\x9dN\x88\x01n\x00\xf4i\xd5\x80\x0f\xa0\x00\xc0\xca\xb1[\xe1\xf4i\xd5\x80\x0f\xa0\x00\xa9\x00\x00\xaa\xaa\x03\x00\x00\x00\x08\x00E\x00\x00:\xab\x02@\x00@\x11{\x96\n\n\x00\x06\n\n\x00\x01\x99\xd3"\xb9\x00&\x10\xec123456789012345678901234567890)\xa9\xa1y')
-
+    # print("hex compare with mac pkt ->", phyBiToBytePack == b'\x08\x01n\x00\xf4i\xd5\x80\x0f\xa0\x00\xc0\xca\xb1[\xe1\xf4i\xd5\x80\x0f\xa0\x00\xa9\xaa\xaa\x03\x00\x00\x00\x08\x00E\x00\x00:\xab\x02@\x00@\x11{\x96\n\n\x00\x06\n\n\x00\x01\x99\xd3"\xb9\x00&\x10\xec123456789012345678901234567890\xa3]\xee\xec')
 
     "mimo rx"
-    addr1 = os.path.join(pyToolPath,"../tmp/sig80211GenMultipleMimo_2x2_0.bin")
-    addr2 = os.path.join(pyToolPath,"../tmp/sig80211GenMultipleMimo_2x2_1.bin")
+    # addr1 = os.path.join(pyToolPath,"../tmp/sig80211GenMultipleMimo_2x2_0.bin")
+    # addr2 = os.path.join(pyToolPath,"../tmp/sig80211GenMultipleMimo_2x2_1.bin")
+    addr1 = os.path.join(pyToolPath,"../tmp/ConvOut0.bin")
+    addr2 = os.path.join(pyToolPath,"../tmp/ConvOut1.bin")
     phymimo = dephy80211sumimo(addr1,addr2)
     phymimo.rxMimoStepsList()
 
     
 
     # MAC       
-    # phyBits = [1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 1, 0, 0, 0, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 1, 1, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 0, 1, 0, 0, 1, 1, 1, 0, 0, 0, 1, 1, 0, 1, 1, 1, 0, 1, 1, 0, 1, 0, 1, 0, 0, 0, 0, 1, 1, 1, 0, 0, 1, 0, 1, 1, 1, 1, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 0, 0, 0, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 1, 1, 1, 1, 0, 0, 1, 0, 1, 1, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 1, 1, 0, 0, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 0, 1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 1, 1, 0, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 0, 0, 0, 0, 1, 0, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 0, 1, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 1, 0, 1, 0, 1, 1, 1, 1, 0, 0, 1, 1, 1, 0, 0, 0, 1, 1, 1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 0, 1, 1, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 1, 0, 0, 0, 1, 1, 1, 0, 1, 1, 1, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 0, 1, 1, 1, 0, 0, 0, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 1, 0, 1, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 0, 1, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 1, 1, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 1, 1, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 1, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0, 1, 1, 0, 1, 0, 0, 0, 1, 0, 0, 1, 1, 0, 1, 1, 1, 0, 1, 0, 0, 1, 1, 1, 0, 1, 1, 0, 0, 0, 0, 1, 0, 1, 1, 0, 1, 1, 1, 1, 1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 1, 0, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0, 1, 1, 1, 1, 0, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1, 0, 1, 1, 1, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 1, 0, 0, 0, 1, 1, 1, 0, 1, 1, 1, 0, 0, 1, 0, 1, 1, 1, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 1, 0, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 0, 0, 1, 1, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 1, 1, 0, 1, 0, 1, 0, 1, 1, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 1, 1, 0, 1, 1, 1, 0, 0, 0, 1, 1, 0, 1, 1, 0, 0, 0, 1, 1, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 1, 1, 0, 1, 1, 0, 0, 0, 1, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 1, 0, 1, 1, 0, 1, 1, 0, 1, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 1, 1, 0, 0, 1, 0, 0, 0, 1, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 1, 1, 1, 0, 1, 0, 1, 0, 0, 0, 0, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 1, 1, 0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 0, 1, 1, 0, 1, 1, 1, 0, 0, 1, 0, 1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0, 1, 1, 0, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 1, 1, 1, 0, 1, 1, 0, 0, 0, 0, 1, 0, 1, 0, 1, 1, 0, 1, 1, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 1, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0, 0, 0, 1, 0, 0, 1, 1, 0, 1, 1, 1, 1, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1, 1, 0, 1, 1, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 1, 1, 0, 0, 1, 0, 0, 1, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 1, 0, 1, 0, 1, 0, 0, 1, 1, 1, 0, 0, 0, 1, 1, 0, 1, 0, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 1, 1, 0, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 0, 1, 0, 1, 1, 1, 1, 0, 0, 1, 0, 1, 1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1, 0, 1, 1, 0, 0, 0, 1, 1, 1, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 0, 1, 1, 1, 0, 1, 0, 1, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 1, 0, 0, 1, 1, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0, 1, 1, 1, 1, 0, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 1, 0, 0, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 0, 1, 0, 1, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 1, 0, 1, 1, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 1, 0, 1, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 0, 0, 0, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 0, 1, 0, 0, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0, 0, 1, 1, 1, 0, 1, 0, 1, 1, 0, 0, 1, 1, 1, 1]
     # upperlayer = mac.RxMac80211(phyBits, debug = True)
     # msg = upperlayer.rxMacStepsList()
     # print("udp payload:",msg)

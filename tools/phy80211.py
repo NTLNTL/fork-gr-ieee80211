@@ -861,17 +861,18 @@ class phy80211():
                 tmpPilot = p8h.C_PILOT_L
                 tmpPilotPIdx = 1
                 tmpDataScaleFactor = 52
-            for symIter in range(0, self.m.nSym):
+            for symIter in range(0, self.m.nSym):#self.m.nSym
                 tmpPilotAdded = p8h.procPilotInsert(self.ssSymbols[ssItr][int(symIter*self.m.nSD): int((symIter+1)*self.m.nSD)], [each * p8h.C_PILOT_PS[tmpPilotPIdx] for each in tmpPilot])
-                print("pilot print",[each * p8h.C_PILOT_PS[tmpPilotPIdx] for each in tmpPilot])
+                print("pilot ",p8h.C_PILOT_PS[tmpPilotPIdx],tmpPilot)
+
+                print("pilot print with PS",[each * p8h.C_PILOT_PS[tmpPilotPIdx] for each in tmpPilot])
                 self.ssPhySig[ssItr] = p8h.procConcat2Symbol(self.ssPhySig[ssItr], p8h.procGi(p8h.procToneScaling(
                 p8h.procFftMod(p8h.procCSD(p8h.procNonDataSC(p8h.procDcInsert(tmpPilotAdded)), self.m.nSS, ssItr, self.m.spr)),
                 tmpDataScaleFactor, self.m.nSS)))
                 tmpPilotPIdx = (tmpPilotPIdx + 1) % 127
-                
                 if(not(self.m.phyFormat == p8h.F.L)):
                     tmpPilot = tmpPilot[1:] + [tmpPilot[0]] 
-
+                # myConstellationPlot(tmpPilotAdded)
     def __genOfdmSignalNdp(self):
         self.ssPhySig = []
         for i in range(0, self.m.nSS):
